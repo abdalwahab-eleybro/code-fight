@@ -8,265 +8,18 @@
 window.CF = window.CF || {};
 
 /* ─────────────────────────────────────────────────────────── */
-/*  CF.Motion — hand-authored Manim-style SVG scenes            */
-/*                                                              */
-/*  Remotion / manim require a build pipeline and produce       */
-/*  video files; this app is a zero-build single-page game, so  */
-/*  we recreate the SAME visual language natively:             */
-/*   · dark canvas + faint grid (the 3b1b backdrop)            */
-/*   · shapes that DRAW THEMSELVES on entry (stroke dashoffset) */
-/*   · elements that GLIDE with eased transforms, never snap    */
-/*   · glowing "dots" travelling along paths (packet flow)      */
-/*   · camera labels that fade up like 3b1b annotations        */
-/*                                                              */
-/*  A scene is declarative data:                                */
-/*  { viewBox:'0 0 640 260',                                   */
-/*    defs:[{id:'grad-x', kind:'linear'|'radial', stops:[[o,c]]}],*/
-/*    items:[                                                   */
-/*      { id, kind:'rect'|'circle'|'path'|'text'|'arrow'|'arc', */
-/*        x,y,w,h,r,d, text, fill, stroke, sw, opacity, rx,     */
-/*        anchor, size, weight,                                */
-/*        enter:'fade'|'draw'|'pop', delay(ms),                */
-/*        glow:true|color, pulse:true,                         */
-/*        motion:{ at:ms, dur:ms, ease:'smooth'|'bounce',      */
-/*                 props:{ x, y, w, h, r, scale, opacity,      */
-/*                         rotate } }                           */
-/*    ] }                                                       */
-/*                                                              */
-/*  mountScene(el, spec) paints it once (each element keeps a   */
-/*  stable DOM node keyed by id, so re-mounts tween from the    */
-/*  previous state instead of hard-cutting).                    */
-/*  Returns { play(), stop(), setMotion(id, m), el }.           */
+/*  EASINGS — shared motion vocabulary (Manim-style curves).   */
+/*  Every choreographed move in the app pulls from this table  */
+/*  so pointer glides, value morphs and packet rides all feel  */
+/*  like ONE engine instead of ad-hoc CSS defaults.            */
 /* ─────────────────────────────────────────────────────────── */
-CF.Motion = (() => {
-  const NS = 'http://www.w3.org/2000/svg';
-  let uid = 0;
-
-  function mk(tag, attrs) {
-    const n = document.createElementNS(NS, tag);
-    for (const k in attrs) if (attrs[k] != null) n.setAttribute(k, attrs[k]);
-    return n;
-  }
-  const EASE = 'cubic-bezier(.4,0,.2,1)';           /* smooth  */
-  const EASE_POP = 'cubic-bezier(.34,1.56,.64,1)';  /* bounce  */
-
-  function baseAttrs(it) {
-    const a = {};
-    if (it.x != null) a.x = it.x;
-    if (it.y != null) a.y = it.y;
-    if (it.w != null) a.width = it.w;
-    if (it.h != null) a.height = it.h;
-    if (it.r != null) a.r = it.r;
-    if (it.rx != null) a.rx = it.rx;
-    if (it.d != null) a.d = it.d;
-    if (it.cx != null) a.cx = it.cx;
-    if (it.cy != null) a.cy = it.cy;
-    if (it.fill != null) a.fill = it.fill;
-    if (it.stroke != null) a.stroke = it.stroke;
-    if (it.sw != null) a['stroke-width'] = it.sw;
-    if (it.opacity != null) a.opacity = it.opacity;
-    if (it.anchor) { a['text-anchor'] = it.anchor; }
-    if (it.size) a['font-size'] = it.size;
-    if (it.weight) a['font-weight'] = it.weight;
-    if (it.family) a['font-family'] = it.family;
-    return a;
-  }
-
-  function makeItem(it, defsHost, svgId) {
-    let n;
-    switch (it.kind) {
-      case 'circle': n = mk('circle', baseAttrs(it)); break;
-      case 'path':   n = mk('path', baseAttrs(it)); break;
-      case 'arc':    n = mk('path', baseAttrs(it)); break;
-      case 'text': {
-        n = mk('text', baseAttrs(it));
-        n.textContent = it.text != null ? String(it.text) : '';
-        break;
-      }
-      case 'arrow': {
-        /* line with an arrowhead marker */
-        const mid = 'mk-' + svgId + '-' + (++uid);
-        const marker = mk('marker', {
-          id: mid, viewBox: '0 0 10 10', refX: 8, refY: 5,
-          markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse'
-        });
-        marker.appendChild(mk('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: it.stroke || '#94a3b8' }));
-        defsHost.appendChild(marker);
-        n = mk('line', {
-          x1: it.x1, y1: it.y1, x2: it.x2, y2: it.y2,
-          stroke: it.stroke || '#94a3b8', 'stroke-width': it.sw || 2,
-          'marker-end': `url(#${mid})`, opacity: it.opacity
-        });
-        break;
-      }
-      default: n = mk('rect', baseAttrs(it));
-    }
-    if (it.glow) {
-      const col = it.glow === true ? (it.stroke || it.fill || '#22d3ee') : it.glow;
-      const f = 'glow-' + svgId + '-' + (++uid);
-      const filt = mk('filter', { id: f, x: '-60%', y: '-60%', width: '220%', height: '220%' });
-      filt.appendChild(mk('feDropShadow', { dx: 0, dy: 0, stdDeviation: 4, 'flood-color': col, 'flood-opacity': .85 }));
-      defsHost.appendChild(filt);
-      n.setAttribute('filter', `url(#${f})`);
-    }
-    if (it.pulse) {
-      const anim = mk('animate', {
-        attributeName: 'opacity', values: `${it.opacity ?? 1};${(it.opacity ?? 1) * .35};${it.opacity ?? 1}`,
-        dur: '1.6s', repeatCount: 'indefinite'
-      });
-      n.appendChild(anim);
-    }
-    return n;
-  }
-
-  /* apply static geometry (used for initial paint + motion targets) */
-  function place(n, it) {
-    const t = [];
-    if (it.rotate) {
-      const cx = (it.x || 0) + (it.w || 0) / 2, cy = (it.y || 0) + (it.h || 0) / 2;
-      t.push(`rotate(${it.rotate} ${it.cx || cx} ${it.cy || cy})`);
-    }
-    if (it.scale != null && it.scale !== 1) {
-      const ox = it.x != null ? it.x : (it.cx || 0);
-      const oy = it.y != null ? it.y : (it.cy || 0);
-      t.push(`translate(${ox} ${oy}) scale(${it.scale}) translate(${-ox} ${-oy})`);
-    }
-    n.style.transformOrigin = 'center';
-    if (t.length) n.style.transform = t.join(' ');
-  }
-
-  function runMotion(node, m, it) {
-    /* animate position/size props via attributes; transform props via WAAPI */
-    const to = {};
-    const p = m.props || {};
-    if (p.x != null) to.x = p.x;
-    if (p.y != null) to.y = p.y;
-    if (p.w != null) to.width = p.w;
-    if (p.h != null) to.height = p.h;
-    if (p.r != null) to.r = p.r;
-    if (p.opacity != null) to.opacity = p.opacity;
-    const dur = m.dur || 900;
-    const easing = m.ease === 'bounce' ? EASE_POP : EASE;
-    const start = () => {
-      if (Object.keys(to).length && node.animate) {
-        const frames = [{}];
-        const end = {};
-        for (const k in to) {
-          const cur = parseFloat(node.getAttribute(k)) || 0;
-          frames[0][k] = cur; end[k] = to[k];
-        }
-        try { node.animate([frames[0], end], { duration: dur, easing, fill: 'forwards' }); }
-        catch (e) { /* attribute fallback below */ }
-        setTimeout(() => { for (const k in to) node.setAttribute(k, to[k]); }, dur + 30);
-      }
-      if (p.scale != null || p.rotate != null) {
-        const nextIt = Object.assign({}, it, p);
-        const before = node.style.transform || 'none';
-        place(node, nextIt);
-        if (node.animate) {
-          try { node.animate([{ transform: before }, { transform: node.style.transform }],
-            { duration: dur, easing, fill: 'forwards' }); } catch (e) {}
-        }
-      }
-    };
-    if (m.at != null) setTimeout(start, m.at); else start();
-  }
-
-  function mountScene(el, spec) {
-    if (!spec || !spec.items) return null;
-    const svgId = 'sc' + (++uid);
-    el.innerHTML = '';
-    const svg = mk('svg', {
-      viewBox: spec.viewBox || '0 0 640 260',
-      class: 'mt-svg', preserveAspectRatio: 'xMidYMid meet'
-    });
-    const defs = mk('defs', {});
-    (spec.defs || []).forEach(d => {
-      const g = mk(d.kind === 'radial' ? 'radialGradient' : 'linearGradient', { id: d.id });
-      (d.stops || []).forEach(s =>
-        g.appendChild(mk('stop', { offset: s[0], 'stop-color': s[1], 'stop-opacity': s[2] != null ? s[2] : 1 })));
-      defs.appendChild(g);
-    });
-    /* faint 3b1b grid backdrop */
-    const pat = mk('pattern', { id: 'mt-grid-' + svgId, width: 28, height: 28, patternUnits: 'userSpaceOnUse' });
-    pat.appendChild(mk('path', { d: 'M 28 0 L 0 0 0 28', fill: 'none', stroke: 'rgba(148,163,184,.08)', 'stroke-width': 1 }));
-    defs.appendChild(pat);
-    svg.appendChild(defs);
-    svg.appendChild(mk('rect', { x: 0, y: 0, width: '100%', height: '100%', fill: `url(#mt-grid-${svgId})` }));
-
-    const nodes = {};
-    spec.items.forEach(it => {
-      const n = makeItem(it, defs, svgId);
-      n.setAttribute('data-mt', it.id || ('i' + (++uid)));
-      place(n, it);
-      svg.appendChild(n);
-      nodes[it.id] = n;
-
-      /* entry choreography */
-      const delay = it.delay || 0;
-      if (it.enter === 'draw' && (it.kind === 'path' || it.kind === 'arc' || it.kind === 'arrow')) {
-        try {
-          const len = n.getTotalLength ? n.getTotalLength() : 0;
-          if (len) {
-            n.style.strokeDasharray = len;
-            n.style.strokeDashoffset = len;
-            n.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }],
-              { duration: it.dur || 900, delay, easing: EASE, fill: 'forwards' });
-          }
-        } catch (e) {}
-      } else if (it.enter === 'pop') {
-        n.style.opacity = 0;
-        if (n.animate) n.animate(
-          [{ opacity: 0, transform: 'scale(.4)' }, { opacity: 1, transform: 'scale(1)' }],
-          { duration: 420, delay, easing: EASE_POP, fill: 'both' });
-        else n.style.opacity = it.opacity != null ? it.opacity : 1;
-      } else if (it.enter === 'fade') {
-        n.style.opacity = 0;
-        if (n.animate) n.animate([{ opacity: 0 }, { opacity: it.opacity != null ? it.opacity : 1 }],
-          { duration: 600, delay, easing: EASE, fill: 'forwards' });
-        else n.style.opacity = it.opacity != null ? it.opacity : 1;
-      }
-
-      /* scheduled motions */
-      (Array.isArray(it.motion) ? it.motion : it.motion ? [it.motion] : [])
-        .forEach(m => runMotion(n, m, it));
-
-      /* travelling dot along a path (flow packets) */
-      if (it.travel) {
-        const tr = it.travel;
-        const dot = mk('circle', { r: tr.r || 5, fill: tr.color || '#22d3ee' });
-        const flt = mk('filter', { id: 'tg' + svgId + (++uid), x: '-80%', y: '-80%', width: '260%', height: '260%' });
-        flt.appendChild(mk('feDropShadow', { dx: 0, dy: 0, stdDeviation: 3.2, 'flood-color': tr.color || '#22d3ee', 'flood-opacity': .9 }));
-        defs.appendChild(flt);
-        dot.setAttribute('filter', `url(#${flt.id})`);
-        svg.appendChild(dot);
-        const ghost = mk('path', { d: tr.d, fill: 'none', stroke: 'none' });
-        svg.appendChild(ghost);
-        const go = () => {
-          try {
-            const len = ghost.getTotalLength();
-            const frames = [];
-            for (let i = 0; i <= 30; i++) {
-              const pt = ghost.getPointAtLength(len * i / 30);
-              frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)` });
-            }
-            dot.animate(frames, { duration: tr.dur || 1400, easing: EASE, iterations: tr.loop ? Infinity : 1 });
-          } catch (e) {}
-        };
-        setTimeout(go, tr.at || 0);
-      }
-    });
-
-    el.appendChild(svg);
-    return {
-      svg,
-      node: (id) => nodes[id],
-      setMotion: (id, m) => { const it = spec.items.find(i => i.id === id); if (nodes[id] && it) runMotion(nodes[id], m, it); }
-    };
-  }
-
-  return { mountScene };
-})();
+CF.Ease = {
+  smooth: t => t * t * (3 - 2 * t),                                   /* smoothstep  */
+  outCubic: t => 1 - Math.pow(1 - t, 3),                              /* decelerate  */
+  inOutCubic: t => (t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
+  outBack: t => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); },
+  outElastic: t => t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - .75) * (2 * Math.PI / 3)) + 1
+};
 
 /* ─────────────────────────────────────────────────────────── */
 /*  NARRATOR — narration goes in the AUDIO channel,            */
@@ -302,6 +55,27 @@ CF.Narrator = (() => {
     try { window.speechSynthesis.onvoiceschanged = () => { voicePicked = false; pickVoice(); }; } catch (e) {}
   }
 
+  let keepAliveTimer = null;
+  function stopKeepAlive() {
+    if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+  }
+  function startKeepAlive(u) {
+    /* Chrome bug: long utterances (>~15 s) silently die mid-sentence —
+       speaking stays true, no onend ever fires, and every gate that
+       waits for the voice FREEZES. The classic workaround: toggle the
+       queue with pause()/resume() every few seconds while we speak. */
+    stopKeepAlive();
+    keepAliveTimer = setInterval(() => {
+      try {
+        if (!curUtter || curUtter !== u) { stopKeepAlive(); return; }
+        if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+          window.speechSynthesis.pause();
+          window.speechSynthesis.resume();
+        }
+      } catch (e) { stopKeepAlive(); }
+    }, 7000);
+  }
+
   function speak(text) {
     if (!enabled || !supported() || !text) return;
     try {
@@ -315,11 +89,12 @@ CF.Narrator = (() => {
       startedAt = 0; endedAt = 0;
       speakAt = Date.now();
       u.onstart = () => { startedAt = Date.now(); };
-      u.onend = () => { endedAt = Date.now(); if (curUtter === u) curUtter = null; };
-      u.onerror = () => { endedAt = Date.now(); if (curUtter === u) curUtter = null; };
+      u.onend = () => { endedAt = Date.now(); stopKeepAlive(); if (curUtter === u) curUtter = null; };
+      u.onerror = () => { endedAt = Date.now(); stopKeepAlive(); if (curUtter === u) curUtter = null; };
       curUtter = u;
+      startKeepAlive(u);
       window.speechSynthesis.speak(u);
-    } catch (e) { curUtter = null; /* non-fatal */ }
+    } catch (e) { curUtter = null; stopKeepAlive(); /* non-fatal */ }
   }
 
   /* true ONLY while the voice has verifiably started and not yet finished.
@@ -335,10 +110,21 @@ CF.Narrator = (() => {
     try {
       if (!startedAt) return (Date.now() - speakAt) < 700;
       if (!(window.speechSynthesis.speaking || window.speechSynthesis.pending)) return false;
-      const cap = Math.min(estimateMs(curUtter.text, rate) + 2500, 12000);
+      /* HARD CAP: never trust the engine past estimate + slack. Without
+         this a wedged speechSynthesis (speaking stays true forever in
+         some engines) froze every voice-gated step mid-sentence. */
+      const cap = estimateMs(curUtter.text, rate) + 4000;
       if (Date.now() - startedAt > cap) return false;
       return true;
     } catch (e) { return false; }
+  }
+
+  /* Absolute deadline by which the CURRENT utterance must be considered
+     finished, no matter what the engine claims. Every playback gate uses
+     this as its final fallback so nothing can wait on voice forever. */
+  function busyUntil() {
+    if (!enabled || !supported() || !curUtter || endedAt) return 0;
+    return (startedAt || speakAt) + estimateMs(curUtter.text, rate) + 4000;
   }
 
   /* Rough spoken-duration estimate (~380 ms/word + punctuation pauses).
@@ -364,6 +150,7 @@ CF.Narrator = (() => {
     speak, stop,
     supported,
     isSpeaking,
+    busyUntil,
     estimateMs,
     isEnabled: () => enabled,
     setEnabled: (v) => { enabled = !!v; if (!enabled) stop(); },
@@ -821,367 +608,385 @@ CF.Visualizer = (() => {
 
   const PTR_COLORS = { L: 'var(--player)', R: 'var(--enemy)', i: '#a78bfa', l: '#fbbf24', 'r+1': '#fb923c', out: '#94a3b8' };
 
-  /* ── ANIM SCENE — 3blue1brown-style: elements PERSIST and GLIDE.
-     renderScene() below rebuilds the DOM on every step, which made each
-     transition a hard cut. animateScene() diffs against the previous
-     paint (stored on the stage element) and only touches what changed:
-     · cells keep their identity → value/border/height tween in CSS
-     · pointers are reused      → they slide from old cell to new cell
-     Falls through to renderScene on full re-layouts (length change). */
-  function animateScene(stage, state) {
-    const prev = stage._vzState;
-    const arr = state.arr || [];
-    const nums = arr.filter(x => typeof x === 'number');
-    const lo = Math.min.apply(null, nums.length ? nums : [0]);
-    const hi = Math.max.apply(null, nums.length ? nums : [1]);
 
-    if (!prev || !prev.mainRow || !stage.contains(prev.mainRow) ||
-        prev.arr.length !== arr.length) {
-      /* structural change (or first paint): build once, then remember it */
-      renderScene(stage, state);
-      const row = stage.querySelector('.vz-row');
-      stage._vzState = {
-        arr: arr.slice(), row2Arr: state.row2 ? (state.row2.arr || []).slice() : null,
-        mainRow: row,
-        ptrLayer: stage.querySelector('.vz-ptrs'),
-        auxEl: stage.querySelector('.vz-aux')
-      };
+
+
+
+  /* ══════════════════════════════════════════════════════════
+     SCENE ENGINE (shared by watch / drive / idea / problem)
+     Manim-style continuity: DOM objects PERSIST across steps and
+     are diffed against the new state — cells morph in place
+     (numbers roll, bars grow), pointers GLIDE between indices,
+     marks bloom, chips flip. Only a structural change (array
+     length differs) triggers a clean re-layout with a soft fade,
+     never a hard innerHTML wipe mid-scene.
+     ══════════════════════════════════════════════════════════ */
+
+  /* one shared rAF scheduler: cancel stale tweens on fast scrubbing */
+  const tweens = new Map();
+  let rafId = null;
+  function runTweens(now) {
+    tweens.forEach((tw, key) => {
+      if (tw.dead) { tweens.delete(key); return; }
+      const t = Math.min(1, (now - tw.t0) / tw.dur);
+      const e = tw.ease(t);
+      tw.onUpdate(e, t);
+      if (t >= 1) { tweens.delete(key); if (tw.onEnd) tw.onEnd(); }
+    });
+    rafId = tweens.size ? requestAnimationFrame(runTweens) : null;
+  }
+  function tween(key, dur, ease, onUpdate, onEnd) {
+    tweens.delete(key); /* re-issue cancels the previous animation of this object */
+    tweens.set(key, { t0: performance.now(), dur, ease: ease || CF.Ease.inOutCubic, onUpdate, onEnd, dead: false });
+    if (!rafId) rafId = requestAnimationFrame(runTweens);
+  }
+  function killTween(key) { const tw = tweens.get(key); if (tw) tw.dead = true; tweens.delete(key); }
+
+  /* per-element motion memory: prev values / prev pointer x / prev marks */
+  function meta(el) {
+    if (!el._mt) el._mt = {};
+    return el._mt;
+  }
+
+  function markOf(state, i) {
+    return (state.marks && (state.marks[i] || state.marks[String(i)])) || '';
+  }
+
+  /* number roll: old digit morphs into new one (TransformMatchingObjects) */
+  function rollNumber(valEl, from, to, durMs) {
+    const numFrom = Number(from), numTo = Number(to);
+    if (!(isFinite(numFrom) && isFinite(numTo)) || !valEl.animate) {
+      valEl.textContent = String(to);
+      if (valEl.animate) valEl.animate([{ transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 260, easing: 'cubic-bezier(.34,1.56,.64,1)' });
       return;
     }
-
-    /* values + marks: mutate in place so CSS transitions carry the change.
-       THE 3B1B FIX: cell fill is a child element (.vz-fill) whose height is
-       a real px value — animating `height` actually tweens. (The old version
-       animated the custom property --h, which CSS cannot interpolate without
-       @property support, so every "animation" was an instant snap.) */
-    const cells = prev.mainRow.querySelectorAll('.vz-cell');
-    arr.forEach((v, i) => {
-      const cell = cells[i];
-      if (!cell) return;
-      const valEl = cell.querySelector('.vz-val');
-      /* POLISH #3: the number itself morphs (scale-flip) when it changes —
-         Manim's Transform(value) gesture instead of a silent text swap */
-      if (valEl && String(valEl.textContent) !== String(v)) {
-        valEl.textContent = v;
-        try {
-          valEl.animate([{ transform: 'scale(.4)', opacity: .25 },
-                         { transform: 'scale(1.18)', opacity: 1, offset: .7 },
-                         { transform: 'scale(1)', opacity: 1 }],
-            { duration: 420, easing: 'cubic-bezier(.34,1.56,.64,1)' });
-        } catch (e) {}
-      }
-      const mk = state.marks?.[i] || state.marks?.[String(i)] || '';
-      const want = 'vz-cell' + (mk ? ' ' + mk : '');
-      if (cell.className !== want) {
-        /* POLISH #4: a mark turning ON pops the cell border/glow in with a
-           quick scale bounce instead of appearing instantly */
-        const wasDimmed = cell.classList.contains('vz-dim');
-        cell.className = want;
-        if (!wasDimmed && mk) {
-          try {
-            cell.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.09)' }, { transform: 'scale(1)' }],
-              { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' });
-          } catch (e) {}
-        }
-      }
-      let frac = 0.6;
-      if (typeof v === 'number') frac = hi > lo ? (v - lo) / (hi - lo) : 0.6;
-      const hpx = Math.round(28 + frac * 54);
-      const fill = cell.querySelector('.vz-fill');
-      if (fill && fill.style.height !== hpx + 'px') fill.style.height = hpx + 'px';
-      if (cell.style.getPropertyValue('--h') !== (Math.round(frac * 100)) + '%') {
-        cell.style.setProperty('--h', (Math.round(frac * 100)) + '%');
-      }
+    const t0 = performance.now(), dur = durMs || 420;
+    const key = 'roll:' + (valEl._rk || (valEl._rk = Math.random().toString(36).slice(2)));
+    tween(key, dur, CF.Ease.outCubic, (e) => {
+      valEl.textContent = String(Math.round(numFrom + (numTo - numFrom) * e));
     });
-
-    /* pointers: reuse the layer — positionPointers slides existing tags */
-    if (prev.ptrLayer) positionPointers(prev.ptrLayer, prev.mainRow, state.ptrs || {}, arr.length);
-
-    /* aux chips: rebuild only when the numbers actually changed.
-       POLISH #5: if the row already exists, update values IN PLACE and pop
-       any chip whose value changed — the old full-rebuild made the whole
-       chip row blink out-and-back on every single step. */
-    const auxKey = JSON.stringify(state.aux || []);
-    if (auxKey !== (stage._vzAuxKey || '')) {
-      stage._vzAuxKey = auxKey;
-      const existing = stage.querySelector('.vz-aux');
-      if (existing && state.aux && state.aux.length === existing.children.length) {
-        state.aux.forEach((a, i) => {
-          const chip = existing.children[i];
-          const bEl = chip.querySelector('b');
-          const wantTxt = `<b>${esc(a.label)}</b> ${esc(a.value)}`;
-          if (chip.innerHTML !== wantTxt) {
-            const oldVal = chip.textContent.replace(bEl ? bEl.textContent : '', '').trim();
-            chip.innerHTML = wantTxt;
-            if (oldVal !== String(a.value).trim()) {
-              try {
-                chip.animate([{ transform: 'scale(.82)', opacity: .4 },
-                              { transform: 'scale(1.07)', offset: .65 },
-                              { transform: 'scale(1)', opacity: 1 }],
-                  { duration: 380, easing: 'cubic-bezier(.34,1.56,.64,1)' });
-              } catch (e) {}
-            }
-          }
-        });
-      } else {
-        if (existing) existing.remove();
-        if (state.aux && state.aux.length) {
-          const aux = document.createElement('div');
-          aux.className = 'vz-aux';
-          state.aux.forEach(a => {
-            const chip = document.createElement('span');
-            chip.className = 'vz-aux-chip';
-            chip.innerHTML = `<b>${esc(a.label)}</b> ${esc(a.value)}`;
-            aux.appendChild(chip);
-          });
-          const r2w = stage.querySelector('.vz-row2-wrap');
-          if (r2w) stage.insertBefore(aux, r2w); else stage.appendChild(aux);
-        }
-      }
-    }
-
-    /* second row (prefix/output): cheap diff — same length mutates, else rebuild */
-    const wantLen = state.row2 ? (state.row2.arr || []).length : 0;
-    const hadLen = prev.row2Arr ? prev.row2Arr.length : -1;
-    if (wantLen !== hadLen) {
-      const oldWrap = stage.querySelector('.vz-row2-wrap');
-      if (oldWrap) oldWrap.remove();
-      stage.querySelectorAll(':scope > .vz-ptrs').forEach(p => { if (p !== prev.ptrLayer) p.remove(); });
-      if (state.row2) {
-        const r2wrap = document.createElement('div');
-        r2wrap.className = 'vz-row2-wrap';
-        const lbl = document.createElement('div');
-        lbl.className = 'vz-row2-label';
-        lbl.textContent = state.row2.label || '';
-        r2wrap.appendChild(lbl);
-        const row = document.createElement('div');
-        row.className = 'vz-row small';
-        (state.row2.arr || []).forEach((v, i) => {
-          const cell = document.createElement('div');
-          const mk = state.row2.marks?.[i] || state.row2.marks?.[String(i)] || '';
-          cell.className = 'vz-cell ' + (mk || '');
-          cell.dataset.i = i;
-          cell.style.setProperty('--h', '36%');
-          cell.innerHTML = `<span class="vz-fill" style="height:14px"></span>` +
-                           `<span class="vz-val">${esc(v)}</span>`;
-          row.appendChild(cell);
-        });
-        r2wrap.appendChild(row);
-        stage.appendChild(r2wrap);
-        if (state.row2.ptrs && Object.keys(state.row2.ptrs).length) {
-          const p2 = document.createElement('div');
-          p2.className = 'vz-ptrs';
-          stage.appendChild(p2);
-          positionPointers(p2, row, state.row2.ptrs, (state.row2.arr || []).length);
-        }
-      }
-    } else if (state.row2) {
-      const wrap = stage.querySelector('.vz-row2-wrap');
-      if (wrap) {
-        const r2cells = wrap.querySelectorAll('.vz-cell');
-        (state.row2.arr || []).forEach((v, i) => {
-          const cell = r2cells[i];
-          if (!cell) return;
-          const valEl = cell.querySelector('.vz-val');
-          if (valEl && String(valEl.textContent) !== String(v)) {
-            valEl.textContent = v;
-            try {
-              valEl.animate([{ transform: 'scale(.4)', opacity: .25 },
-                             { transform: 'scale(1.18)', opacity: 1, offset: .7 },
-                             { transform: 'scale(1)', opacity: 1 }],
-                { duration: 420, easing: 'cubic-bezier(.34,1.56,.64,1)' });
-            } catch (e) {}
-          }
-          const mk = state.row2.marks?.[i] || state.row2.marks?.[String(i)] || '';
-          const want = 'vz-cell ' + (mk || '');
-          if (cell.className !== want) {
-            cell.className = want;
-            if (mk) {
-              try {
-                cell.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.09)' }, { transform: 'scale(1)' }],
-                  { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' });
-              } catch (e) {}
-            }
-          }
-        });
-        const p2 = stage.querySelector('.vz-row2-wrap + .vz-ptrs') ||
-                   [...stage.children].filter(c => c.classList.contains('vz-ptrs')).pop();
-        if (state.row2.ptrs && Object.keys(state.row2.ptrs).length) {
-          let layer = null;
-          stage.querySelectorAll('.vz-ptrs').forEach(l => { if (l !== prev.ptrLayer) layer = l; });
-          if (!layer) {
-            layer = document.createElement('div');
-            layer.className = 'vz-ptrs';
-            stage.appendChild(layer);
-          }
-          positionPointers(layer, wrap.querySelector('.vz-row.small') || wrap, state.row2.ptrs, wantLen);
-        }
-      }
-    }
-
-    stage._vzState = {
-      ...stage._vzState,
-      arr: arr.slice(), row2Arr: state.row2 ? (state.row2.arr || []).slice() : null
-    };
   }
 
-  function esc(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  /* build a fresh cell (used on first paint / structural relayout) */
+  function makeCell(v, i, frac, small) {
+    const cell = document.createElement('div');
+    cell.className = 'vz-cell' + (small ? ' small' : '');
+    cell.dataset.i = i;
+    cell.style.setProperty('--h', Math.round(frac * 100) + '%');
+    cell.innerHTML = `<span class="vz-fill" style="height:${Math.round(28 + frac * 54)}px"></span>` +
+                     `<span class="vz-val">${esc(v)}</span>`;
+    meta(cell).value = v;
+    meta(cell).frac = frac;
+    return cell;
   }
 
-  /* ── GLIDE — reuse the existing scene when the shape is unchanged so
-     cells tween their heights and pointers slide instead of hard-cutting.
-     Falls back to a full rebuild on structural changes. Shared by the
-     player AND the mini stages (idea phase, problem phase). ── */
-  function glideScene(stage, state) {
-    if (!state) return false;
-    const arr = state.arr || [];
-    const prev = stage._vzState;
-    const sameShape = prev && prev.mainRow && stage.contains(prev.mainRow) &&
-      prev.arr.length === arr.length &&
-      JSON.stringify(prev.row2Arr || []) === JSON.stringify((state.row2 && state.row2.arr) || prev.row2Arr || []);
-    if (sameShape) {
-      animateScene(stage, state);
-      return true; /* tweened — callers must wait for it to land */
-    }
-    stage.classList.remove('vz-cut');
-    void stage.offsetWidth; /* restart the keyframe */
-    renderScene(stage, state);
-    stage._vzState = {
-      arr: arr.slice(),
-      row2Arr: state.row2 ? (state.row2.arr || []).slice() : null,
-      mainRow: stage.querySelector('.vz-row'),
-      ptrLayer: stage.querySelector('.vz-ptrs')
-    };
-    stage.classList.add('vz-cut');
-    return false;
-  }
-
-  /* ── SCENE RENDER (shared by watch / drive modes) ── */
-  function renderScene(stage, state) {
-    if (!state) return;
-    stage.innerHTML = '';
-
-    /* main array row */
-    const main = document.createElement('div');
-    main.className = 'vz-row';
-    stage.appendChild(main);
-
-    const arr = state.arr || [];
+  /* animate ONE row toward its target state, reusing existing cells */
+  function syncRow(row, arr, marks, small, speedK) {
     const nums = arr.filter(x => typeof x === 'number');
     const lo = Math.min.apply(null, nums.length ? nums : [0]);
     const hi = Math.max.apply(null, nums.length ? nums : [1]);
+    const dur = (ms) => ms * (speedK || 1);
 
-    /* POLISH A: long rows shrink their cells to fit the stage instead of
-       overflowing into a scrollbar — positions stay measurable for arcs and
-       the whole array is visible at once (Manim frames every object). */
-    const availW = (stage.clientWidth || 640) - 8;
-    const wide = Math.max(30, Math.min(46, Math.floor(availW / Math.max(1, arr.length)) - 6));
+    /* reuse or create cells positionally */
+    const old = Array.from(row.children);
     arr.forEach((v, i) => {
-      const cell = document.createElement('div');
-      const mk = state.marks?.[i] || state.marks?.[String(i)] || '';
-      cell.className = 'vz-cell' + (mk ? ' ' + mk : '');
-      if (wide < 46) cell.style.width = wide + 'px';
-      cell.dataset.i = i;
-      let frac = 0.6;
-      if (typeof v === 'number') frac = hi > lo ? (v - lo) / (hi - lo) : 0.6;
-      else frac = 0.5;
-      cell.style.setProperty('--h', Math.round(frac * 100) + '%');
-      /* .vz-fill: a real px height that CSS can tween — the animated bar
-         behind the value (3b1b-style growth/morph of the bars) */
-      cell.innerHTML = `<span class="vz-fill" style="height:${Math.round(28 + frac * 54)}px"></span>` +
-                       `<span class="vz-val">${esc(v)}</span>`;
-      main.appendChild(cell);
-    });
-
-    /* pointer layer under main row */
-    const ptrLayer = document.createElement('div');
-    ptrLayer.className = 'vz-ptrs';
-    stage.appendChild(ptrLayer);
-    positionPointers(ptrLayer, main, state.ptrs || {}, arr.length);
-
-    /* aux chips (sum, target, best…) */
-    if (state.aux && state.aux.length) {
-      const aux = document.createElement('div');
-      aux.className = 'vz-aux';
-      state.aux.forEach(a => {
-        const chip = document.createElement('span');
-        chip.className = 'vz-aux-chip';
-        chip.innerHTML = `<b>${esc(a.label)}</b> ${esc(a.value)}`;
-        aux.appendChild(chip);
-      });
-      stage.appendChild(aux);
-    }
-
-    /* second row (prefix arrays / output rows) */
-    if (state.row2) {
-      const r2wrap = document.createElement('div');
-      r2wrap.className = 'vz-row2-wrap';
-      const lbl = document.createElement('div');
-      lbl.className = 'vz-row2-label';
-      lbl.textContent = state.row2.label || '';
-      r2wrap.appendChild(lbl);
-
-      const row = document.createElement('div');
-      row.className = 'vz-row small';
-      (state.row2.arr || []).forEach((v, i) => {
-        const cell = document.createElement('div');
-        const mk = state.row2.marks?.[i] || state.row2.marks?.[String(i)] || '';
-        cell.className = 'vz-cell ' + (mk || '');
-        cell.dataset.i = i;
-        if (typeof v === 'number') {
-          const frac = hi > lo ? (v - lo) / (hi - lo) : 0.5;
-          cell.style.setProperty('--h', (24 + Math.round(frac * 40)) + '%');
-        } else { cell.style.setProperty('--h', '36%'); }
-        cell.innerHTML = `<span class="vz-val">${esc(v)}</span>`;
-        row.appendChild(cell);
-      });
-      r2wrap.appendChild(row);
-      stage.appendChild(r2wrap);
-
-      if (state.row2.ptrs && Object.keys(state.row2.ptrs).length) {
-        const p2 = document.createElement('div');
-        p2.className = 'vz-ptrs';
-        stage.appendChild(p2);
-        positionPointers(p2, row, state.row2.ptrs, (state.row2.arr || []).length);
+      const frac = typeof v === 'number' ? (hi > lo ? (v - lo) / (hi - lo) : 0.6) : 0.5;
+      let cell = old[i];
+      if (!cell || cell.classList.contains('vz-exiting')) {
+        cell = makeCell(v, i, frac, small);
+        if (old[i]) old[i].remove();
+        row.insertBefore(cell, old[i + 1] || null);
+        cell.classList.add('vz-entering');
+        setTimeout(() => cell.classList.remove('vz-entering'), 400);
+      } else {
+        const m = meta(cell);
+        /* VALUE MORPH: only when the number actually changed */
+        if (String(m.value) !== String(v)) {
+          rollNumber(cell.querySelector('.vz-val'), m.value, v, dur(420));
+          m.value = v;
+        }
+        /* BAR GROW/MORPH via CSS-tweened --h + fill height */
+        if (m.frac !== frac) {
+          cell.style.setProperty('--h', Math.round(frac * 100) + '%');
+          cell.querySelector('.vz-fill').style.height = Math.round(28 + frac * 54) + 'px';
+          m.frac = frac;
+        }
       }
+      /* MARK TRANSFORMS: bloom on enter, settle on leave */
+      const mk = marks && (marks[i] || marks[String(i)]) || '';
+      const prevMk = meta(cell).mark || '';
+      if (prevMk !== mk) {
+        ['cmp', 'win', 'out', 'write'].forEach(c => cell.classList.remove(c));
+        if (mk) {
+          cell.classList.add(mk);
+          if (cell.animate) {
+            const col = mk === 'win' ? '251,191,36' : mk === 'write' ? '34,197,94' : mk === 'cmp' ? '34,211,238' : '148,163,184';
+            cell.animate([
+              { boxShadow: `0 0 0 0 rgba(${col},.6)` },
+              { boxShadow: `0 0 0 8px rgba(${col},0)` }
+            ], { duration: dur(520), easing: 'ease-out' });
+          }
+        }
+        meta(cell).mark = mk;
+      }
+    });
+    /* cells beyond the new length fade out (FadeOut) */
+    for (let i = arr.length; i < old.length; i++) {
+      const c = old[i];
+      if (!c || c.classList.contains('vz-exiting')) continue;
+      c.classList.add('vz-exiting');
+      if (c.animate) c.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(8px) scale(.8)' }], { duration: dur(260), fill: 'forwards' });
+      setTimeout(() => c.remove(), dur(300));
     }
   }
 
-  function positionPointers(layer, row, ptrs, n) {
-    Object.keys(ptrs).forEach(id => {
+  /* pointers glide: keep the same DOM node, animate left → left */
+  function positionPointers(layer, row, ptrs, n, speedK) {
+    const cells = row.querySelectorAll('.vz-cell:not(.vz-exiting)');
+    const lr = layer.getBoundingClientRect();
+    const wantIds = Object.keys(ptrs || {});
+    /* retire pointers that vanished */
+    layer.querySelectorAll('.vz-ptr').forEach(el => {
+      if (!wantIds.includes(el.dataset.ptr)) {
+        if (el.animate) el.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateX(-50%) translateY(6px)' }], { duration: 220, fill: 'forwards' });
+        setTimeout(() => el.remove(), 240);
+      }
+    });
+    wantIds.forEach(id => {
       const i = ptrs[id];
-      let el = layer.querySelector(`[data-ptr="${id}"]`);
+      let el = layer.querySelector(`[data-ptr="${CSS.escape ? CSS.escape(id) : id}"]`) ||
+               Array.from(layer.querySelectorAll('.vz-ptr')).find(x => x.dataset.ptr === id);
       if (!el) {
         el = document.createElement('div');
-        el.className = 'vz-ptr';
+        el.className = 'vz-ptr vz-ptr-new';
         el.dataset.ptr = id;
         el.innerHTML = `<span class="vz-ptr-tag">${esc(id)}</span><span class="vz-ptr-arrow">▲</span>`;
         layer.appendChild(el);
       }
-      const cells = row.querySelectorAll('.vz-cell');
-      const cell = cells[Math.max(0, Math.min(i, cells.length - 1))];
-      if (cell) {
-        /* rect-based positioning: correct no matter which ancestor is the
-           offsetParent (the idea-phase mini stage is not position:relative
-           the way the player stage is, so offsetLeft measured from the
-           wrong origin and every pointer shifted right) */
-        const lr = layer.getBoundingClientRect();
-        const cr = cell.getBoundingClientRect();
-        if (i > cells.length - 1) {
-          /* pointer past the last cell (e.g. 'r+1' at the exclusive right
-             edge): hover it just beyond the row instead of clamping it onto
-             the last cell, which is a different index */
-          el.style.left = (cr.right - lr.left + 4) + 'px';
-        } else {
-          el.style.left = (cr.left - lr.left + cr.width / 2) + 'px';
-        }
-      }
+      const idx = Math.max(0, Math.min(i, cells.length - 1));
+      const cell = cells[idx];
+      if (!cell) return;
+      const cr = cell.getBoundingClientRect();
+      const targetX = (i > cells.length - 1)
+        ? (cr.right - lr.left + 4)                    /* past-the-end pointer hovers beyond the row */
+        : (cr.left - lr.left + cr.width / 2);
+      const m = meta(el);
+      const fromX = (typeof m.x === 'number' && el.style.left) ? m.x : targetX;
       const col = PTR_COLORS[id] || 'var(--player)';
-      el.style.color = col;              /* arrow + fallbacks */
-      el.style.setProperty('--ptr-col', col); /* name chip background */
+      el.style.color = col;
+      el.style.setProperty('--ptr-col', col);
+      if (Math.abs(fromX - targetX) > 1) {
+        /* GLIDE along an eased path (MotionMatcher-style smooth travel) */
+        tween('ptr:' + id + ':' + (layer._uid || (layer._uid = Math.random().toString(36).slice(2))),
+          380 * (speedK || 1), CF.Ease.inOutCubic,
+          (e) => { const x = fromX + (targetX - fromX) * e; el.style.left = x + 'px'; m.x = x; },
+          () => { m.x = targetX; el.style.left = targetX + 'px'; });
+      } else {
+        el.style.left = targetX + 'px'; m.x = targetX;
+      }
     });
   }
+
+  /* aux chips: text-swap animates (Flip-ish pop), added chips slide in */
+  function syncAux(stage, auxList) {
+    let aux = stage.querySelector(':scope > .vz-aux');
+    if (!auxList || !auxList.length) { if (aux) aux.remove(); return; }
+    if (!aux) { aux = document.createElement('div'); aux.className = 'vz-aux'; stage.appendChild(aux); }
+    const want = auxList.map(a => `${a.label}\u0000${a.value}`);
+    /* remove stale / exiting */
+    Array.from(aux.children).forEach(ch => {
+      if (!want.includes(ch.dataset.k)) {
+        if (ch.animate) ch.animate([{ opacity: 1 }, { opacity: 0, transform: 'scale(.85)' }], { duration: 200, fill: 'forwards' });
+        setTimeout(() => ch.remove(), 220);
+        ch.dataset.k = '\u0000dead'; /* don't double-process */
+      }
+    });
+    want.forEach((k, i) => {
+      let chip = Array.from(aux.children).find(c => c.dataset.k === k);
+      if (!chip) {
+        const a = auxList[i];
+        chip = document.createElement('span');
+        chip.className = 'vz-aux-chip';
+        chip.dataset.k = k;
+        chip.innerHTML = `<b>${esc(a.label)}</b> ${esc(a.value)}`;
+        aux.appendChild(chip);
+        if (chip.animate) chip.animate(
+          [{ opacity: 0, transform: 'translateY(6px) scale(.9)' }, { opacity: 1, transform: 'none' }],
+          { duration: 300, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+      } else if (chip.dataset.stale) {
+        delete chip.dataset.stale;
+      }
+    });
+  }
+
+  /* ── PUBLIC: render/animate a scene toward `state`.
+        opts.fx  → sceneFx choreography overlay (rings/dim/arcs/pulse)
+        opts.cut → force clean relayout (phase switches)            ── */
+  function renderScene(stage, state, opts) {
+    if (!state) return;
+    opts = opts || {};
+    const speedK = 1;
+
+    /* structural check: does the persistent layout still match? */
+    const rowSel = opts.smallRow ? '.vz-row.small' : ':scope > .vz-row:not(.small)';
+    let main = stage.querySelector(':scope > .vz-row');
+    let ptrLayer = stage.querySelector(':scope > .vz-ptrs:first-of-type');
+    const arr = state.arr || [];
+    const structOk = main && ptrLayer &&
+      main.querySelectorAll('.vz-cell:not(.vz-exiting)').length === arr.length &&
+      !opts.cut;
+
+    if (!structOk) {
+      /* full (re)build — but with a SOFT cut, not a blink */
+      stage.querySelectorAll(':scope > .vz-row, :scope > .vz-ptrs, :scope > .vz-aux, :scope > .vz-row2-wrap, :scope > .vz-fx-svg').forEach(n => n.remove());
+      main = document.createElement('div');
+      main.className = 'vz-row';
+      stage.appendChild(main);
+      arr.forEach((v, i) => {
+        const nums = arr.filter(x => typeof x === 'number');
+        const lo = Math.min.apply(null, nums.length ? nums : [0]);
+        const hi = Math.max.apply(null, nums.length ? nums : [1]);
+        const frac = typeof v === 'number' ? (hi > lo ? (v - lo) / (hi - lo) : 0.6) : 0.5;
+        const cell = makeCell(v, i, frac, false);
+        /* POLISH A: long rows shrink cells to fit — positions stay
+           measurable for arcs, whole array framed at once */
+        const availW = (stage.clientWidth || 640) - 8;
+        const wide = Math.max(30, Math.min(46, Math.floor(availW / Math.max(1, arr.length)) - 6));
+        if (wide < 46) cell.style.width = wide + 'px';
+        const mk = markOf(state, i);
+        if (mk) { cell.classList.add(mk); meta(cell).mark = mk; }
+        main.appendChild(cell);
+      });
+      ptrLayer = document.createElement('div');
+      ptrLayer.className = 'vz-ptrs';
+      stage.appendChild(ptrLayer);
+      stage.classList.remove('vz-cut'); void stage.offsetWidth; stage.classList.add('vz-cut');
+    } else {
+      /* in-place morph: cells roll/grow, marks bloom */
+      const availW = (stage.clientWidth || 640) - 8;
+      const wide = Math.max(30, Math.min(46, Math.floor(availW / Math.max(1, arr.length)) - 6));
+      Array.from(main.children).forEach(c => { if (wide < 46) c.style.width = wide + 'px'; });
+      syncRow(main, arr, state.marks, false, speedK);
+    }
+
+    positionPointers(ptrLayer, main, state.ptrs || {}, arr.length, speedK);
+    syncAux(stage, state.aux);
+
+    /* second row (prefix arrays / output rows) */
+    if (state.row2) {
+      let wrap = stage.querySelector(':scope > .vz-row2-wrap');
+      const r2arr = state.row2.arr || [];
+      if (!wrap) {
+        wrap = document.createElement('div');
+        wrap.className = 'vz-row2-wrap';
+        wrap.innerHTML = `<div class="vz-row2-label"></div><div class="vz-row small"></div>`;
+        stage.appendChild(wrap);
+      }
+      wrap.querySelector('.vz-row2-label').textContent = state.row2.label || '';
+      syncRow(wrap.querySelector('.vz-row.small'), r2arr, state.row2.marks, true, speedK);
+      let p2 = wrap.querySelector(':scope > .vz-ptrs');
+      if (state.row2.ptrs && Object.keys(state.row2.ptrs).length) {
+        if (!p2) { p2 = document.createElement('div'); p2.className = 'vz-ptrs'; wrap.appendChild(p2); }
+        positionPointers(p2, wrap.querySelector('.vz-row.small'), state.row2.ptrs, r2arr.length, speedK);
+      } else if (p2) p2.remove();
+    } else {
+      const wrap = stage.querySelector(':scope > .vz-row2-wrap');
+      if (wrap) wrap.remove();
+    }
+
+    /* sceneFx choreography overlay (hand-authored beats + auto-diff) */
+    applySceneFx(stage, state, opts.fx);
+  }
+
+  /* ── sceneFx: rings, dim focus, self-drawing arcs + packet rides,
+        halo pulses. All positioned from live cell rects so they work
+        inside the player stage AND the mini stages alike.
+
+        MEASURE GUARD: when a stage is not laid out yet (jsdom, hidden
+        tab, zero-size container) every rect collapses to 0×0 — drawing
+        then paints invisible garbage. Skip the paint and re-check on
+        the next frame instead. ── */
+  function applySceneFx(stage, state, fx, _retry) {
+    let svg = stage.querySelector(':scope > .vz-fx-svg');
+    if (!fx) {
+      stage.querySelectorAll('.vz-cell.vz-ring, .vz-cell.vz-dim').forEach(c => c.classList.remove('vz-ring', 'vz-dim'));
+      if (svg) svg.remove();
+      return;
+    }
+    const cells = Array.from(stage.querySelectorAll(':scope > .vz-row > .vz-cell'));
+    const sr = stage.getBoundingClientRect();
+    if ((!sr.width || !sr.height) && !_retry) {
+      requestAnimationFrame(() => applySceneFx(stage, state, fx, true));
+      return;
+    }
+    const centers = cells.map(c => {
+      const r = c.getBoundingClientRect();
+      return { x: r.left - sr.left + r.width / 2, y: r.top - sr.top + r.height / 2, w: r.width, h: r.height };
+    });
+    /* dim everything outside the focus set → "this move, and only this" */
+    const focus = new Set((fx.cells || []).concat(fx.ring || [], fx.arc ? fx.arc : [], fx.pulse != null ? [fx.pulse] : []));
+    cells.forEach((c, i) => {
+      c.classList.toggle('vz-dim', !!fx.dim && focus.size > 0 && !focus.has(i));
+      c.classList.toggle('vz-ring', !!(fx.ring && fx.ring.includes(i)));
+    });
+    /* SVG overlay: arcs + packets + halo */
+    if (!svg) {
+      svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'vz-fx-svg');
+      stage.appendChild(svg);
+    }
+    svg.innerHTML = '';
+    const NS = 'http://www.w3.org/2000/svg';
+    const color = fx.color || '#fbbf36';
+    if (fx.pulse != null && centers[fx.pulse]) {
+      const c = centers[fx.pulse];
+      const halo = document.createElementNS(NS, 'circle');
+      halo.setAttribute('cx', c.x); halo.setAttribute('cy', c.y); halo.setAttribute('r', c.w * 0.7);
+      halo.setAttribute('fill', 'none'); halo.setAttribute('stroke', color); halo.setAttribute('class', 'vz-halo');
+      svg.appendChild(halo);
+      if (halo.animate) {
+        halo.animate([{ opacity: .9, transform: `translate(${c.x}px,${c.y}px) scale(.6)` },
+                      { opacity: 0, transform: `translate(${c.x}px,${c.y}px) scale(1.9)` }],
+          { duration: 1200, iterations: Infinity, easing: 'ease-out' });
+        halo.style.transformOrigin = `${-c.x}px ${-c.y}px`;
+        halo.setAttribute('cx', 0); halo.setAttribute('cy', 0);
+      }
+    }
+    if (fx.arc && centers[fx.arc[0]] && centers[fx.arc[1]]) {
+      const a = centers[fx.arc[0]], b = centers[fx.arc[1]];
+      const lift = Math.min(46, 14 + Math.abs(b.x - a.x) * 0.22);
+      const d = `M ${a.x} ${a.y - a.h / 2 - 4} Q ${(a.x + b.x) / 2} ${Math.min(a.y, b.y) - a.h / 2 - 4 - lift} ${b.x} ${b.y - b.h / 2 - 4}`;
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', d); path.setAttribute('class', 'vz-arc');
+      path.setAttribute('stroke', color);
+      svg.appendChild(path);
+      try {
+        const len = path.getTotalLength();
+        path.style.strokeDasharray = len;
+        path.style.strokeDashoffset = len;
+        if (path.animate) {
+          path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }],
+            { duration: 500, easing: 'ease-out', fill: 'forwards' });
+          if (fx.token) {
+            const dot = document.createElementNS(NS, 'circle');
+            dot.setAttribute('r', '5'); dot.setAttribute('class', 'vz-token-dot');
+            dot.setAttribute('fill', color);
+            svg.appendChild(dot);
+            const frames = [];
+            for (let k = 0; k <= 24; k++) {
+              const pt = path.getPointAtLength(len * k / 24);
+              frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)`, offset: k / 24 });
+            }
+            setTimeout(() => {
+              if (dot.animate) dot.animate(frames, { duration: 620, delay: 380, easing: 'ease-in-out', fill: 'forwards' });
+            }, 0);
+          }
+        }
+      } catch (e) { /* getTotalLength unavailable: static arc still shows */ }
+    }
+  }
+
+
 
   /* ── PLAYER ── */
   function createPlayer(opts) {
@@ -1322,6 +1127,11 @@ CF.Visualizer = (() => {
        so a wedged engine can't hide a prompt forever. */
     function voiceBusy() {
       if (!CF.Narrator.isEnabled() || !CF.Narrator.supported()) return false;
+      /* NEVER trust speechSynthesis.speaking alone: it wedges true in
+         several engines and froze every gated step. The Narrator's own
+         tracked utterance (with a hard estimate cap) is the source of
+         truth; `pending` only counts while that utterance is live. */
+      if (!CF.Narrator.isSpeaking()) return false;
       try { return window.speechSynthesis.speaking || window.speechSynthesis.pending; }
       catch (e) { return false; }
     }
@@ -1334,13 +1144,19 @@ CF.Visualizer = (() => {
         holdMs = text ? Math.min(CF.Narrator.estimateMs(text, 2), 4000) : 0;
       } else {
         /* voice on → spoken duration estimate as the floor; the engine's own
-           speaking/pending flags extend it when real speech runs longer */
-        holdMs = Math.min(CF.Narrator.estimateMs(text, prefs.speed || 1), 20000);
+           speaking/pending flags extend it when real speech runs longer.
+           Cap 15 s to match estimateMs — a wedged engine can never push
+           this gate out further (was 20 s, a freeze window). */
+        holdMs = Math.min(CF.Narrator.estimateMs(text, prefs.speed || 1), 15000);
       }
       const t0 = Date.now();
+      /* ABSOLUTE DEADLINE: a wedged voice engine can never hide a prompt
+         forever — after hold + slack the callback fires regardless. */
+      const deadline = t0 + holdMs + 4000;
       let settled = false;
       const tick = () => {
         if (destroyed || settled) return;
+        if (Date.now() >= deadline) { settled = true; fn(); return; }
         const el = Date.now() - t0;
         if (el < holdMs || voiceBusy()) { timer = setTimeout(tick, 200); return; }
         settled = true;
@@ -1350,21 +1166,70 @@ CF.Visualizer = (() => {
       tick();
     }
 
+    /* ── AUTO-CHOREOGRAPHY (auto_diff in Manim terms) ──
+       When a step carries no hand-authored sceneFx, derive one from the
+       DELTA against the previous painted state: changed cells get rings,
+       moved pointers pulse toward their destination, everything outside
+       the delta dims. This means EVERY lesson trace animates coherently
+       even when its data never mentions animation at all. */
+    let lastPainted = null;
+    function autoFx(s) {
+      if (s.sceneFx) return s.sceneFx;
+      const prev = lastPainted;
+      const st = s.state || {};
+      if (!prev) return null;
+      const arr = st.arr || [], parr = prev.arr || [];
+      if (arr.length !== parr.length) return null; /* structural cut: no diff fx */
+      const changed = [];
+      for (let i = 0; i < arr.length; i++) if (String(arr[i]) !== String(parr[i])) changed.push(i);
+      const marksOn = [], marksOff = [];
+      const pm = prev.marks || {}, cm = st.marks || {};
+      Object.keys(cm).forEach(k => { if (cm[k] && cm[k] !== pm[k]) marksOn.push(Number(k)); });
+      const ptrMoved = [];
+      const pp = prev.ptrs || {}, cp = st.ptrs || {};
+      Object.keys(cp).forEach(id => { if (pp[id] != null && pp[id] !== cp[id]) ptrMoved.push({ id, from: pp[id], to: cp[id] }); });
+      const ring = [...new Set(changed.concat(marksOn).filter(n => !Number.isNaN(n)))].slice(0, 6);
+      if (!ring.length && !ptrMoved.length) return null;
+      const fx = { dim: true, ring, cells: ring };
+      if (ptrMoved.length) { fx.pulse = Math.max(0, Math.min(ptrMoved[0].to, arr.length - 1)); fx.color = '#22d3ee'; }
+      if (changed.length === 1 && s.fx && (s.fx.type === 'write' || s.fx.type === 'swap') && ptrMoved.length) {
+        fx.arc = [ptrMoved[0].from, changed[0]]; fx.token = true; /* value rides the pointer → cell */
+      }
+      return fx;
+    }
+
     function renderStep() {
       const s = steps[idx];
       if (!s) return;
-      /* 3b1b-style motion: the scene GLIDES when only values/marks/pointers
-         changed; a structural jump (step-back, loop edge, re-init) hard-cuts
-         with a quick fade instead of freezing mid-animation. */
-      const glided = glideScene(stage, s.state || { arr: [] });
-      stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
-      sceneFx(s, glided); /* manim-style focus/rings/arcs, layered on the fresh scene */
+      const fxObj = autoFx(s);
+      renderScene(stage, s.state || { arr: [] }, { fx: fxObj });
+      lastPainted = s.state;
+      /* FREEZE ROOT-CAUSE FIX: onProgress was accepted by createPlayer
+         but NEVER invoked anywhere. Lesson phases (Watch market cards,
+         Drive prompts) rely on this hook to mount their checkpoint UI —
+         without it a 🤔 step paused the player over an empty host: no
+         animation, no question, no escape. That is exactly what looked
+         like "the lesson freezes in the problem/watch section".
+         Fire it for every painted step so hosts can react (mount or
+         clear) deterministically. */
+      if (onProgress) { try { onProgress(idx, s); } catch (e) {} }
       container.querySelector('.vz-progress').textContent = `${idx + 1} / ${steps.length}`;
       codeEl.querySelectorAll('.vz-code-line').forEach(l =>
         l.classList.toggle('active', Number(l.dataset.line) === (s.line ?? -1)));
       cap.textContent = s.caption || '';
       cap.className = 'vz-caption' + (prefs.captions && s.narration ? ' full' : '');
       if (prefs.captions && s.narration) cap.textContent = s.narration;
+      /* SPEAK THE STEP: the player owns its narration. Without this the
+         walkthrough was silent AND every voice gate waited on a stale
+         utterance from the previous phase — steps advanced out of sync
+         with what the learner could see. Track when we spoke so the
+         pacing gates have an honest clock even without speechSynthesis. */
+      const spokenText = s.narration || s.caption || '';
+      narrationStartedAt = Date.now();
+      narrationMs = CF.Narrator.estimateMs(spokenText, prefs.speed || 1);
+      if (spokenText) CF.Narrator.speak(spokenText);
+      /* caption re-entry pop — text changes deserve a soft arrival too */
+      if (cap.animate) cap.animate([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: 300, easing: 'ease-out' });
       if (s.fx && s.fx.type) {
         const arr = s.state?.arr || [];
         const numsA = arr.filter(x => typeof x === 'number');
@@ -1375,186 +1240,6 @@ CF.Visualizer = (() => {
           valueHi: numsA.length ? Math.max.apply(null, numsA) : 1
         });
       }
-      /* MANIM-STYLE CHOREOGRAPHY per step (data-driven, opt-in via s.sceneFx):
-         · dim   — every cell not part of this move fades back (focus shift)
-         · ring  — glow rings pulse on the named cells (Transform highlighting)
-         · arc   — a curved arrow draws itself between two cells (swap/move)
-         · glide — travelling packet rides the arc (the "hand" carrying values)
-                   …or an animated value TOKEN flies cell→cell when token set
-         · pulse — a soft expanding halo under one cell (window/center growth)
-         Without sceneFx the old behaviour is untouched: marks only. */
-      function sceneFx(s, glided) {
-        const fx = s.sceneFx;
-        const cells = Array.from(stage.querySelectorAll('.vz-cell'));
-        cells.forEach(c => { c.classList.remove('vz-dim', 'vz-ring'); });
-        stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
-        if (!fx) return;
-        const mainRow = stage.querySelector('.vz-row');
-        if (!mainRow) return;
-        /* POLISH #1: never measure mid-glide. Cells and pointers are still
-           CSS-transitioning to their new spots for ~450 ms after a glide —
-           arcs drawn now start/end at stale coordinates and visibly detach
-           from the cells they point at. Wait until the tween lands. */
-        const DELAY = glided ? 480 : 60;
-        if (fx.dim) {
-          const keep = new Set([].concat(fx.cells || [], fx.from != null ? [fx.from] : [], fx.to != null ? [fx.to] : []));
-          cells.forEach(c => { if (!keep.has(Number(c.dataset.i))) c.classList.add('vz-dim'); });
-        }
-        if (fx.cells) {
-          fx.cells.forEach(i => {
-            const c = cells.filter(x => Number(x.dataset.i) === i)[0];
-            if (c) c.classList.add('vz-ring');
-          });
-        }
-        const wantArc = fx.arc && fx.from != null && fx.to != null;
-        const wantToken = fx.token && fx.from != null && fx.to != null;
-        if (!wantArc && !wantToken && !fx.pulse) return;
-        setTimeout(() => {
-          if (destroyed) return;
-          const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-          svg.setAttribute('class', 'vz-fx-svg');
-          svg.style.left = '0'; svg.style.top = '0';
-          svg.width = stage.clientWidth || 640; svg.height = stage.clientHeight || 220;
-          const rs = stage.getBoundingClientRect();
-          const liveCells = Array.from(stage.querySelectorAll('.vz-row > .vz-cell'));
-          const centerOf = (i, bottom) => {
-            const c = liveCells.filter(x => Number(x.dataset.i) === i)[0];
-            if (!c) return null;
-            const r = c.getBoundingClientRect();
-            return { x: r.left - rs.left + r.width / 2, y: (bottom ? r.bottom : r.top) - rs.top };
-          };
-          let path = null, len = 0, p1 = null, p2 = null;
-          if (wantArc || wantToken) {
-            p1 = centerOf(fx.from); p2 = centerOf(fx.to);
-            if (p1 && p2) {
-              const col = fx.color || '#fbbf24';
-              const mx = (p1.x + p2.x) / 2, lift = Math.max(34, Math.min(90, Math.abs(p2.x - p1.x) * .38));
-              const d = `M ${p1.x} ${p1.y} Q ${mx} ${Math.min(p1.y, p2.y) - lift} ${p2.x} ${p2.y}`;
-              const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-              const mid = 'fxm' + (++fxUid);
-              const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-              marker.setAttribute('id', mid); marker.setAttribute('viewBox', '0 0 10 10');
-              marker.setAttribute('refX', 8); marker.setAttribute('refY', 5);
-              marker.setAttribute('markerWidth', 7); marker.setAttribute('markerHeight', 7);
-              marker.setAttribute('orient', 'auto-start-reverse');
-              const mp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-              mp.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); mp.setAttribute('fill', col);
-              marker.appendChild(mp); defs.appendChild(marker); svg.appendChild(defs);
-              path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-              path.setAttribute('d', d); path.setAttribute('fill', 'none');
-              if (wantArc) {
-                path.setAttribute('stroke', col); path.setAttribute('stroke-width', 2.5);
-                path.setAttribute('opacity', .9); path.setAttribute('marker-end', `url(#${mid})`);
-              } else {
-                path.setAttribute('stroke', col); path.setAttribute('stroke-width', 1.5);
-                path.setAttribute('opacity', .45); path.setAttribute('stroke-dasharray', '3 5');
-              }
-              svg.appendChild(path);
-              try {
-                len = path.getTotalLength();
-                path.style.strokeDasharray = wantArc ? len : '3 5';
-                path.style.strokeDashoffset = wantArc ? len : 0;
-                if (wantArc) {
-                  path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }],
-                    { duration: 700, delay: 0, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
-                }
-              } catch (e) {}
-            }
-          }
-          /* value TOKEN: a labelled chip that physically carries the number
-             from cell to cell along the arc — Manim's Transform(Mobject) look */
-          if (wantToken && path && len) {
-            const v = (s.state && Array.isArray(s.state.arr)) ? s.state.arr[fx.from] : '';
-            const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            rect.setAttribute('x', -13); rect.setAttribute('y', -12);
-            rect.setAttribute('width', 26); rect.setAttribute('height', 24);
-            rect.setAttribute('rx', 7);
-            rect.setAttribute('fill', fx.color || '#fbbf24');
-            rect.setAttribute('opacity', '.95');
-            const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('dy', 5);
-            txt.setAttribute('font-size', '13'); txt.setAttribute('font-weight', '800');
-            txt.setAttribute('font-family', 'ui-monospace, Menlo, monospace');
-            txt.setAttribute('fill', '#0a0e1a');
-            txt.textContent = String(v == null ? '' : v).slice(0, 3);
-            g.appendChild(rect); g.appendChild(txt);
-            g.style.transform = `translate(${p1.x}px, ${p1.y}px)`;
-            svg.appendChild(g);
-            const frames = [];
-            for (let k = 0; k <= 36; k++) {
-              const pt = path.getPointAtLength(len * k / 36);
-              frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)` });
-            }
-            try {
-              g.animate(frames, { duration: 1000, delay: 250, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
-              rect.animate([{ opacity: .95 }, { opacity: .95 }, { opacity: 0 }],
-                { duration: 1250, delay: 250, easing: 'ease-in', fill: 'forwards' });
-              txt.animate([{ opacity: .95 }, { opacity: .95 }, { opacity: 0 }],
-                { duration: 1250, delay: 250, easing: 'ease-in', fill: 'forwards' });
-            } catch (e) {}
-          } else if (fx.glide && path && len) {
-            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            dot.setAttribute('r', 5.5); dot.setAttribute('cx', 0); dot.setAttribute('cy', 0);
-            dot.setAttribute('fill', fx.color || '#fbbf24');
-            dot.style.transform = `translate(${p1.x}px, ${p1.y}px)`;
-            svg.appendChild(dot);
-            const frames = [];
-            for (let k = 0; k <= 36; k++) {
-              const pt = path.getPointAtLength(len * k / 36);
-              frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)` });
-            }
-            try {
-              dot.animate(frames, { duration: 1000, delay: 250, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
-            } catch (e) {}
-          }
-          /* pulse: expanding halo under a cell — window growth, palindrome centers */
-          if (fx.pulse != null) {
-            const pc = centerOf(fx.pulse, true);
-            if (pc) {
-              const halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-              halo.setAttribute('cx', pc.x); halo.setAttribute('cy', pc.y - 23);
-              halo.setAttribute('r', 16); halo.setAttribute('fill', 'none');
-              halo.setAttribute('stroke', fx.color || '#22d3ee');
-              halo.setAttribute('stroke-width', 2);
-              svg.appendChild(halo);
-              try {
-                halo.animate([{ r: 14, opacity: .8 }, { r: 46, opacity: 0 }],
-                  { duration: 1100, delay: 100, easing: 'cubic-bezier(.2,.6,.3,1)', iterations: 2 });
-              } catch (e) {
-                halo.animate([{ transform: 'scale(1)', opacity: .8 }, { transform: 'scale(3)', opacity: 0 }],
-                  { duration: 1100, delay: 100, easing: 'cubic-bezier(.2,.6,.3,1)', iterations: 2 });
-              }
-            }
-          }
-          stage.appendChild(svg);
-          /* POLISH #2: arcs are momentary annotations — fade them out so the
-             next step never inherits ghost arrows from the previous one */
-          setTimeout(() => {
-            try {
-              svg.animate([{ opacity: 1 }, { opacity: 0 }],
-                { duration: 450, delay: 2400, easing: 'ease-out', fill: 'forwards' });
-              setTimeout(() => { if (svg.parentNode) svg.remove(); }, 3100);
-            } catch (e) { try { svg.remove(); } catch (e2) {} }
-          }, 0);
-        }, DELAY);
-      }
-      let fxUid = 0;
-
-      CF.Narrator.setRate(prefs.speed || 1);
-      CF.Narrator.speak(s.narration || s.caption || '');
-      /* VOICE-LOCKED CHECKPOINTS: the lesson shell (Watch/Brute phases) used
-         to mount its 🤔 question card on a fixed wall-clock estimate of this
-         sentence. Estimates run long or short → the card either cut in over
-         the narrator's last words, or appeared seconds after the voice ended
-         — silently, below the fold. Now the player owns the clock: lessons
-         poll narrationIdle(), which is true only once the CURRENT step's
-         intro has genuinely been spoken (or, if muted, had reading time). */
-      narrationStartedAt = Date.now();
-      narrationMs = prefs.narration
-        ? Math.min(CF.Narrator.estimateMs(s.narration || s.caption || '', prefs.speed || 1), 20000)
-        : Math.min(stepWaitMs(), 2500);
-      if (onProgress) onProgress(idx, steps.length);
     }
 
     let narrationStartedAt = 0;
@@ -1562,9 +1247,14 @@ CF.Visualizer = (() => {
     function narrationIdle() {
       if (destroyed) return true;
       const el = Date.now() - narrationStartedAt;
+      /* HARD BACKSTOP: whatever the engine claims, after the estimate +
+         slack the voice is declared done. This is what unfreezes the
+         lesson when speechSynthesis wedges mid-sentence. */
+      const bu = CF.Narrator.busyUntil();
+      if (bu && Date.now() > bu) return true;
       if (!prefs.narration) return el >= narrationMs;
       /* hard floor: never let a lying engine release the card while the
-         intro sentence could still be mid-word */
+         intro sentence could still be mid-word — but only up to the cap */
       if (el < Math.min(narrationMs, 1200)) return false;
       return !voiceBusy();
     }
@@ -1622,12 +1312,17 @@ CF.Visualizer = (() => {
          still fall back to the estimate so steps never machine-gun past
          half-heard narration. */
       const minHold = prefs.narration
-        ? Math.min(CF.Narrator.estimateMs(text, prefs.speed || 1), 20000)
+        ? Math.min(CF.Narrator.estimateMs(text, prefs.speed || 1), 15000)
         : stepWaitMs();
       const t0 = Date.now();
+      /* ABSOLUTE DEADLINE: even if voiceBusy() never releases (wedged
+         engine), playback MUST advance by this time. Without it the
+         walkthrough froze forever at the first narrated step. */
+      const deadline = t0 + minHold + 4000;
       let settled = false;
       const tick = () => {
         if (destroyed || !playing || settled) return;
+        if (Date.now() >= deadline) { settled = true; stepForward(); return; }
         const el = Date.now() - t0;
         if (el < minHold || voiceBusy()) { timer = setTimeout(tick, 200); return; }
         settled = true;
@@ -1787,5 +1482,5 @@ CF.Visualizer = (() => {
     return { destroy, goTo, stepForward, narrationIdle, play: () => { if (!playing) togglePlay(); } };
   }
 
-  return { createPlayer, renderScene, animateScene, glideScene };
+  return { createPlayer, renderScene };
 })();

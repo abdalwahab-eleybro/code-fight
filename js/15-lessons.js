@@ -63,16 +63,9 @@ CF.Lessons = (() => {
      the scripts table below — adding a lesson never touches this code. */
   function buildTrace(script, mode) {
     const steps = [];
-    let prevState = null; /* POLISH #9: diff-derived choreography for EVERY trace step */
-    (script.steps || []).forEach((st, i) => {
+    (script.steps || []).forEach((st) => {
       const s = { line: st.line ?? -1, caption: st.caption, narration: st.narration || '', state: st.state, fx: st.fx };
-      /* hand-authored sceneFx wins; otherwise derive it from what CHANGED
-         between this step and the last — rings on changed cells, an arc when
-         a pointer moved, dim elsewhere. This lifts every legacy hand-written
-         lesson (twoSum/minSubarray/prefix/primitives/f1 + brute traces) into
-         the same animated language as the sheet lessons. */
-      s.sceneFx = bespokeFx(st) || diffSceneFx(prevState, st.state);
-      prevState = st.state || prevState;
+      if (st.sceneFx) s.sceneFx = st.sceneFx; /* hand-authored choreography rides into the player */
       if (st.auxNote) s.auxNote = st.auxNote;
       if (st.choice && mode === 'watch') {
         s.predict = { q: st.choice.q, options: st.choice.options, correct: st.choice.correct, why: st.choice.why };
@@ -1828,24 +1821,24 @@ CF.Lessons = (() => {
     container.innerHTML = `
       <div class="lsn-wrap">
         ${phaseBar(session, 'Problem')}
-        <div class="lsn-hero">
+        <div class="lsn-hero lsn-anim-in">
           <div class="lsn-hero-icon">${ls.icon}</div>
           <div>
             <div class="lsn-hero-title">${esc(ls.title)}</div>
             <div class="lsn-hero-sub">${esc(ls.hookTitle)} · ${ls.minutes} min</div>
           </div>
         </div>
-        ${ls.imagine ? `<div class="lsn-imagine">
+        ${ls.imagine ? `<div class="lsn-imagine lsn-anim-in d1">
           <div class="lsn-imagine-word">Imagine…</div>
           <p class="lsn-imagine-text">${esc(ls.imagine.text)}</p>
           <div class="mt-stage" id="imagineScene"></div>
         </div>` : ''}
-        <div class="lsn-card plain">
+        <div class="lsn-card plain lsn-anim-in d2">
           <p class="lsn-hook">${esc(ls.hookText)}</p>
           <div class="lsn-obj-title">You will be able to:</div>
           <ul class="lsn-obj">${ls.objectives.map(o => `<li>${esc(o)}</li>`).join('')}</ul>
         </div>
-        <div class="lsn-nav">
+        <div class="lsn-nav lsn-anim-in d3">
           <button class="btn ghost" id="lsnQuit2">Quit</button>
           ${statusOf(ls.id) === 'done' ? '<button class="btn ghost" id="lsnJump">Replay from Watch ▶</button>' : ''}
           <button class="btn primary" id="lsnStart">Begin with the problem ▶</button>
@@ -1853,17 +1846,13 @@ CF.Lessons = (() => {
       </div>`;
     wireQuit(container, session);
     if (ls.imagine) {
-      /* 3b1b-style opener: the imagined world fades in first, then the
-         narrator paints it while a hand-authored Manim-style SVG scene
-         draws itself on screen (shapes ink in, elements glide, glowing
-         dots travel — see CF.Motion). */
-      const im = container.querySelector('.lsn-imagine');
-      requestAnimationFrame(() => im.classList.add('lit'));
-      try {
-        const host = container.querySelector('#imagineScene');
-        const spec = ls.imagine.motion || imagineMotion(ls.id, ls.imagine.scene);
-        if (host && spec && window.CF.Motion) CF.Motion.mountScene(host, spec);
-      } catch (e) { /* motion is decoration — never block the lesson */ }
+      /* LIVING INTRO: the imagine-scene plays a slow ambient loop — halo
+         pulse under the first pointer, rings on the cells the metaphor is
+         about. A still frame said nothing; this breathes. */
+      const iStage = container.querySelector('#imagineScene');
+      if (iStage && ls.imagine.scene) {
+        CF.Visualizer.renderScene(iStage, ls.imagine.scene, { fx: imagineFx(ls.imagine.scene) });
+      }
       CF.Narrator.speak('Imagine this. ' + ls.imagine.text + ' ' + ls.hookNarration);
     } else {
       CF.Narrator.speak(ls.hookNarration);
@@ -1876,130 +1865,18 @@ CF.Lessons = (() => {
     });
   }
 
-  /* ── IMAGINE MOTION — hand-authored Manim-style SVG scenes ──
-     Each opener gets a bespoke CF.Motion spec: shapes ink themselves in,
-     elements glide on eased transforms, glowing dots travel paths.
-     Falls back to a generic "array + pointers" choreography for any
-     lesson without a bespoke scene (uses its imagine.scene data). */
-  const IMAGINE_MOTIONS = {
-    /* f1 · conveyor belt of letter tiles, two hands closing in */
-    f1: () => ({
-      viewBox: '0 0 640 240',
-      items: [
-        { id: 'belt', kind: 'path', d: 'M 40 150 L 600 150', stroke: '#334155', sw: 3, enter: 'draw', dur: 700 },
-        ...['p', 'y', 't', 'h', 'o', 'n'].map((c, i) => ({
-          id: 'tile' + i, kind: 'rect', x: 90 + i * 72, y: 96, w: 56, h: 56, rx: 10,
-          fill: 'rgba(148,163,184,.10)', stroke: '#64748b', sw: 2, enter: 'pop', delay: 300 + i * 120,
-          motion: { at: 1800 + i * 260, dur: 600, ease: 'bounce', props: { y: 96 } }
-        })),
-        ...['p', 'y', 't', 'h', 'o', 'n'].map((c, i) => ({
-          id: 'ch' + i, kind: 'text', x: 118 + i * 72, y: 132, text: c, size: 26, weight: 800,
-          anchor: 'middle', fill: '#e2e8f0', enter: 'fade', delay: 500 + i * 120
-        })),
-        { id: 'handL', kind: 'text', x: 118, y: 60, text: 'L ✋', size: 20, anchor: 'middle', fill: '#22d3ee', glow: '#22d3ee', enter: 'fade', delay: 1200,
-          motion: [{ at: 2600, dur: 900, props: { x: 262 } }, { at: 4200, dur: 900, props: { x: 334 } }] },
-        { id: 'handR', kind: 'text', x: 406, y: 60, text: '✋ R', size: 20, anchor: 'middle', fill: '#fb7185', glow: '#fb7185', enter: 'fade', delay: 1300,
-          motion: [{ at: 2600, dur: 900, props: { x: 262 } }, { at: 4200, dur: 900, props: { x: 190 } }] },
-        { id: 'swapArc', kind: 'arc', d: 'M 118 84 C 160 40 240 40 286 84', fill: 'none', stroke: '#fbbf24', sw: 2.5, opacity: .85, enter: 'draw', delay: 2400, dur: 800,
-          travel: { d: 'M 118 84 C 160 40 240 40 286 84', at: 2700, dur: 1100, color: '#fbbf24' } },
-        { id: 'cap', kind: 'text', x: 320, y: 210, text: 'grab one from each side · trade them · close in', size: 14, anchor: 'middle', fill: '#94a3b8', enter: 'fade', delay: 1600 }
-      ]
-    }),
-    /* p1 · two robots at the ends of a sorted shelf */
-    p1: () => ({
-      viewBox: '0 0 640 240',
-      defs: [{ id: 'shelfG', kind: 'linear', stops: [[0, '#22d3ee'], [1, '#a78bfa']] }],
-      items: [
-        { id: 'shelf', kind: 'rect', x: 60, y: 120, w: 520, h: 10, rx: 5, fill: '#334155', enter: 'draw', dur: 600 },
-        ...[2, 7, 11, 15].map((v, i) => ({
-          id: 'box' + i, kind: 'rect', x: 110 + i * 110, y: 60, w: 70, h: 58, rx: 8,
-          fill: 'rgba(148,163,184,.08)', stroke: 'url(#shelfG)', sw: 2, enter: 'pop', delay: 400 + i * 160
-        })),
-        ...[2, 7, 11, 15].map((v, i) => ({
-          id: 'num' + i, kind: 'text', x: 145 + i * 110, y: 97, text: v, size: 22, weight: 800, anchor: 'middle', fill: '#e2e8f0', enter: 'fade', delay: 560 + i * 160
-        })),
-        { id: 'botL', kind: 'circle', cx: 145, cy: 34, r: 11, fill: '#22d3ee', glow: '#22d3ee', enter: 'pop', delay: 1300,
-          motion: [{ at: 2400, dur: 1000, props: { cx: 255 } }, { at: 4300, dur: 1000, props: { cx: 365 } }] },
-        { id: 'botR', kind: 'circle', cx: 475, cy: 34, r: 11, fill: '#fb7185', glow: '#fb7185', enter: 'pop', delay: 1450,
-          motion: [{ at: 2400, dur: 1000, props: { cx: 365 } }] },
-        { id: 'sumTag', kind: 'text', x: 320, y: 190, text: '2 + 15 = 17 → too big → left robot quits forever', size: 14, anchor: 'middle', fill: '#94a3b8', enter: 'fade', delay: 2200,
-          motion: { at: 4400, dur: 500, props: { opacity: .0 } } },
-        { id: 'sumTag2', kind: 'text', x: 320, y: 190, text: '7 + 15 = 22 … 11 + 15 = 26 … every look retires a box', size: 14, anchor: 'middle', fill: '#fbbf24', enter: 'fade', delay: 4600 }
-      ]
-    }),
-    /* p4 · a lit window sliding over a dark street of cells */
-    p4: () => {
-      const cells = [2, 1, 5, 1, 3, 2];
-      return {
-        viewBox: '0 0 640 240',
-        items: [
-          ...cells.map((v, i) => ({
-            id: 'c' + i, kind: 'rect', x: 80 + i * 80, y: 90, w: 62, h: 62, rx: 10,
-            fill: 'rgba(148,163,184,.07)', stroke: '#475569', sw: 2, enter: 'pop', delay: 250 + i * 110
-          })),
-          ...cells.map((v, i) => ({
-            id: 'v' + i, kind: 'text', x: 111 + i * 80, y: 128, text: v, size: 20, weight: 800, anchor: 'middle', fill: '#cbd5e1', enter: 'fade', delay: 350 + i * 110
-          })),
-          { id: 'win', kind: 'rect', x: 76, y: 82, w: 174, h: 78, rx: 14, fill: 'rgba(251,191,36,.14)', stroke: '#fbbf24', sw: 2.5, glow: '#fbbf24', enter: 'fade', delay: 1200 },
-          { id: 'sumLbl', kind: 'text', x: 163, y: 56, text: 'k = 8?', size: 15, weight: 800, anchor: 'middle', fill: '#fbbf24', enter: 'fade', delay: 1400 },
-          ...[0, 1, 2, 3].map((s, i) => ({
-            id: 'slide' + i, _win: s, kind: 'rect', x: 76 + s * 80, y: 82, w: 174, h: 78, rx: 14,
-            fill: 'rgba(251,191,36,.14)', stroke: '#fbbf24', sw: 2.5, glow: '#fbbf24', opacity: 0,
-            motion: { at: 2000 + i * 1300, dur: 800, props: { opacity: 1 } }
-          })),
-          ...[0, 1, 2, 3].map((s, i) => ({
-            id: 'slbl' + i, kind: 'text', x: 163 + s * 80, y: 56, text: ['8 ✓', '9 ✗', '9 ✗', '6…'][i], size: 15, weight: 800, anchor: 'middle', fill: i === 0 ? '#4ade80' : '#94a3b8', opacity: 0,
-            motion: { at: 2200 + i * 1300, dur: 400, props: { opacity: 1 } }
-          })),
-          { id: 'grow', kind: 'arrow', x1: 250, y1: 190, x2: 330, y2: 190, stroke: '#4ade80', sw: 2.5, enter: 'draw', delay: 1800 },
-          { id: 'gcap', kind: 'text', x: 340, y: 195, text: 'right edge joins → sum grows · left edge leaves → sum shrinks', size: 13, anchor: 'start', fill: '#94a3b8', enter: 'fade', delay: 2000 }
-        ]
-      };
-    },
-    /* p6 · prefix sums as rising water behind each bar */
-    p6: () => ({
-      viewBox: '0 0 640 250',
-      defs: [{ id: 'water', kind: 'linear', stops: [[0, 'rgba(34,211,238,.7)'], [1, 'rgba(34,211,238,.15)']] }],
-      items: [
-        { id: 'floor', kind: 'path', d: 'M 50 190 L 600 190', stroke: '#334155', sw: 2, enter: 'draw', dur: 500 },
-        ...[3, 1, 4, 2, 5].map((v, i) => ({
-          id: 'bar' + i, kind: 'rect', x: 80 + i * 100, y: 190 - v * 16, w: 46, h: v * 16, rx: 4,
-          fill: 'rgba(148,163,184,.18)', stroke: '#64748b', sw: 1.5, enter: 'pop', delay: 300 + i * 130
-        })),
-        ...[3, 1, 4, 2, 5].map((v, i) => ({
-          id: 'wtr' + i, kind: 'rect', x: 80 + i * 100, y: 190, w: 46, h: 0, fill: 'url(#water)', opacity: .9,
-          motion: { at: 1600 + i * 420, dur: 700, ease: 'smooth', props: { y: 190 - [3, 4, 8, 10, 15][i] * 11, h: [3, 4, 8, 10, 15][i] * 11 } }
-        })),
-        ...[3, 4, 8, 10, 15].map((v, i) => ({
-          id: 'pl' + i, kind: 'text', x: 103 + i * 100, y: 190 - v * 11 - 8, text: String(v), size: 15, weight: 800, anchor: 'middle', fill: '#22d3ee', glow: '#22d3ee', opacity: 0,
-          motion: { at: 2000 + i * 420, dur: 400, props: { opacity: 1 } }
-        })),
-        { id: 'qcap', kind: 'text', x: 320, y: 34, text: 'range sum = tall water − short water   (one subtraction, zero walking)', size: 14, anchor: 'middle', fill: '#94a3b8', enter: 'fade', delay: 3600 }
-      ]
-    })
-  };
-
-  function imagineMotion(id, scene) {
-    if (IMAGINE_MOTIONS[id]) return IMAGINE_MOTIONS[id]();
-    /* generic fallback: animate the lesson's own imagine.scene array */
-    const arr = (scene && scene.arr) || [];
-    if (!arr.length) return null;
-    const n = Math.min(arr.length, 8);
-    const step = 480 / n;
-    const items = [];
-    arr.slice(0, n).forEach((v, i) => {
-      items.push({ id: 'g' + i, kind: 'rect', x: 80 + i * step, y: 100, w: step - 12, h: 60, rx: 8,
-        fill: 'rgba(148,163,184,.08)', stroke: '#64748b', sw: 2, enter: 'pop', delay: 250 + i * 110 });
-      items.push({ id: 'gv' + i, kind: 'text', x: 80 + i * step + (step - 12) / 2, y: 136, text: v, size: 18, weight: 800,
-        anchor: 'middle', fill: '#e2e8f0', enter: 'fade', delay: 350 + i * 110 });
-    });
-    Object.keys((scene && scene.ptrs) || {}).forEach((k, pi) => {
-      const idx = Math.min(scene.ptrs[k], n - 1);
-      items.push({ id: 'gp' + k, kind: 'text', x: 80 + idx * step + (step - 12) / 2, y: 72, text: k, size: 16, weight: 800,
-        anchor: 'middle', fill: pi ? '#fb7185' : '#22d3ee', glow: pi ? '#fb7185' : '#22d3ee', enter: 'fade', delay: 900 + pi * 200 });
-    });
-    return { viewBox: '0 0 640 220', items };
+  /* derive gentle choreography for a static "imagine" scene: ring the
+     already-marked cells, halo-pulse under the first pointer */
+  function imagineFx(scene) {
+    const fx = { dim: false, ring: [] };
+    const marks = scene.marks || {};
+    fx.ring = Object.keys(marks).map(Number).filter(n => !Number.isNaN(n)).slice(0, 6);
+    const p = scene.ptrs || {};
+    const first = Object.values(p)[0];
+    if (first != null) { fx.pulse = first; fx.color = '#22d3ee'; }
+    return (fx.ring.length || fx.pulse != null) ? fx : null;
   }
+
 
   function wireQuit(container, session) {
     const q = () => {
@@ -2012,22 +1889,44 @@ CF.Lessons = (() => {
     container.querySelector('#lsnQuit2')?.addEventListener('click', q);
   }
 
-  /* ── PHASE 1 · THE PROBLEM — concrete, zero jargon ── */
+  /* ── PHASE 1 · THE PROBLEM — concrete, zero jargon ──
+     REWRITTEN (freeze fix + interactivity):
+     · ONE persistent scene graph. Selection state lives in `marks`,
+       so every repaint morphs the SAME cells instead of wiping the
+       stage — pointers glide, values roll, marks bloom.
+     · Click handlers are wired ONCE on freshly built cells (the old
+       version re-bound listeners to nodes the engine may have reused
+       or removed mid-animation — taps silently died).
+     · Live math readout: as soon as one tile is picked, its value
+       rides on an auxiliary chip; the second pick shows the running
+       sum / window instantly — before any verdict. Feedback comes
+       from the animation itself, not only from text.
+     · Wrong answers SHAKE the offending tiles and retire them with a
+       self-drawing arc; the correct pair blooms gold with a token
+       riding the arc between them.
+     · No timers gate this phase at all — the freeze could never
+       survive here, and pacing belongs to the player, not the task. */
   function renderProblem(container, session) {
     const ls = session.lesson, pb = ls.problem;
+    const mode = pb.mode;
+    const freeMode = mode === 'free' || (mode === 'stretch' && !pb.query && !(pb.target != null && pb.winLen != null));
+    const promptTxt = mode === 'pair' ? 'Tap <b>two</b> tiles that add up to the target.'
+      : mode === 'ends' ? 'Tap the <b>two</b> tiles that swap first.'
+      : freeMode ? 'Explore: tap any cells — then continue when you feel it.'
+      : 'Tap the <b>first</b> and <b>last</b> cell of the stretch.';
     container.innerHTML = `
       <div class="lsn-wrap">
         ${phaseBar(session, 'Problem')}
-        <div class="lsn-hintline">🎯 <b>The problem first.</b> No jargon, no code — just you versus the task. Try it with your own eyes.</div>
+        <div class="lsn-hintline">🎯 <b>The problem first.</b> No jargon, no code — just you versus the task. Tap the tiles; they answer back.</div>
         <div class="lsn-card plain">
           <div class="lsn-prob-setup">${esc(pb.setup)}</div>
           <div class="lsn-prob-ask">${esc(pb.ask)}</div>
           <div class="lsn-stage-mini" id="probStage"></div>
-          <div class="lsn-prob-aux" id="probAux">${pb.mode === 'pair' ? 'Tap <b>two</b> cells.' : pb.mode === 'ends' ? 'Tap the <b>two</b> tiles that swap first.' : pb.mode === 'free' || (pb.mode === 'stretch' && !pb.query && !(pb.target != null && pb.winLen != null)) ? 'Explore: tap any cells — then continue when you feel it.' : 'Tap the <b>first</b> and <b>last</b> cell of the stretch.'}</div>
+          <div class="lsn-prob-aux" id="probAux">${promptTxt}</div>
         </div>
         <div class="lsn-nav">
           <button class="btn ghost" id="lsnSkip">Skip ▶</button>
-          <button class="btn primary" id="lsnNext" disabled>Continue: feel the cost ▶</button>
+          <button class="btn primary" id="lsnNext" ${freeMode ? '' : 'disabled'}>Continue: feel the cost ▶</button>
         </div>
       </div>`;
     wireQuit(container, session);
@@ -2036,99 +1935,193 @@ CF.Lessons = (() => {
     const aux = container.querySelector('#probAux');
     const nextBtn = container.querySelector('#lsnNext');
     container.querySelector('#lsnSkip').addEventListener('click', () => renderBrute(container, session));
-    let sel = [], solved = false;
-    const freeMode = pb.mode === 'free' || (pb.mode === 'stretch' && !pb.query && !(pb.target != null && pb.winLen != null));
-    if (freeMode) nextBtn.disabled = false;   /* open-ended task: learner explores, then continues */
 
-    function paint(markClass) {
-      const marks = {};
-      sel.forEach(i => { marks[i] = markClass; });
-      CF.Visualizer.glideScene(stage, { arr: pb.arr, ptrs: {}, marks });
-      stage.querySelectorAll('.vz-cell').forEach(cell => {
+    let sel = [], solved = false, attempts = 0;
+    let seq = 0; /* sequence guard: stale timers must never stomp newer state */
+
+    /* build the target scene for the current selection — pure data,
+       the engine diffs it against what is already on screen */
+    function sceneFor(marks, fxSpec) {
+      const st = { arr: pb.arr.slice(), ptrs: {}, marks: marks || {} };
+      if (mode === 'pair' && !freeMode) {
+        if (sel[0] != null) st.ptrs['L'] = sel[0];
+        if (sel[1] != null) st.ptrs['R'] = sel[1];
+      } else if (mode === 'stretch' && !freeMode) {
+        if (sel.length === 2) {
+          st.ptrs['l'] = Math.min(sel[0], sel[1]);
+          st.ptrs['r+1'] = Math.min(Math.max(sel[0], sel[1]) + 1, pb.arr.length);
+          for (let k = Math.min(sel[0], sel[1]); k <= Math.max(sel[0], sel[1]); k++) {
+            if (!st.marks[k]) st.marks[k] = 'cmp';
+          }
+        } else if (sel.length === 1) st.ptrs['l'] = sel[0];
+      } else if (mode === 'ends' && !freeMode) {
+        if (sel[0] != null) st.ptrs['L'] = sel[0];
+        if (sel[1] != null) st.ptrs['R'] = sel[1];
+      }
+      return { state: st, fx: fxSpec || null };
+    }
+
+    /* live math chips — the numbers move WITH the taps */
+    function mathChips(l, r, cls) {
+      const out = [];
+      if (mode === 'pair') {
+        if (sel[0] != null) out.push({ label: 'pick 1', value: String(pb.arr[sel[0]]) });
+        if (sel.length === 2) out.push({ label: 'sum', value: String(pb.arr[l] + pb.arr[r]) });
+        out.push({ label: 'target', value: String(pb.target) });
+      } else if (mode === 'stretch' && !freeMode) {
+        if (sel.length === 2) {
+          const s = pb.arr.slice(l, r + 1).reduce((a, b) => a + b, 0);
+          out.push({ label: 'window', value: `[${l}…${r}]` }, { label: 'sum', value: String(s) });
+          if (pb.query) out.push({ label: 'want', value: `[${pb.query[0]}…${pb.query[1]}]` });
+          else out.push({ label: 'need ≥', value: String(pb.target) }, { label: 'rooms', value: String(r - l + 1) });
+        } else if (sel.length === 1) out.push({ label: 'from', value: String(sel[0]) });
+      } else if (mode === 'ends') {
+        if (sel.length === 2) out.push({ label: 'gap', value: String(Math.abs(l - r) + 1) });
+      }
+      return out;
+    }
+
+    function shakeCells(indices) {
+      indices.forEach(i => {
+        const c = stage.querySelector(`.vz-cell[data-i="${i}"]`);
+        if (c && c.animate) c.animate(
+          [{ transform: 'translateX(0)' }, { transform: 'translateX(-5px)' }, { transform: 'translateX(5px)' },
+           { transform: 'translateX(-3px)' }, { transform: 'translateX(0)' }],
+          { duration: 320, easing: 'ease-out' });
+      });
+    }
+
+    function paint(scene) {
+      CF.Visualizer.renderScene(stage, scene.state, { fx: scene.fx });
+      /* wire taps on brand-new cells exactly once (reused nodes keep
+         their original listener — same dataset.i, same closure) */
+      stage.querySelectorAll('.vz-cell:not([data-wired])').forEach(cell => {
+        cell.dataset.wired = '1';
         cell.addEventListener('click', () => {
           if (solved) return;
           const i = Number(cell.dataset.i);
-          if (sel.includes(i)) { sel = sel.filter(x => x !== i); }
-          else { sel.push(i); if (sel.length > 2) sel.shift(); }
-          if (freeMode) { paint('cmp'); aux.innerHTML = sel.length ? `Tapped ${sel.join(', ')} — keep exploring, then continue when you feel the shape of it.` : 'Explore: tap any cells.'; return; }
+          const wasSelected = sel.includes(i);
+          if (wasSelected) sel = sel.filter(x => x !== i);
+          else { sel.push(i); if (!freeMode && sel.length > 2) sel.shift(); }
+          /* TACTILE SPRING — tapping a tile must feel like pressing a key */
+          if (cell.animate && !wasSelected) {
+            cell.animate([
+              { transform: 'scale(1)' }, { transform: 'scale(.86)', offset: .3 },
+              { transform: 'scale(1.08)', offset: .7 }, { transform: 'scale(1)' }
+            ], { duration: 340, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+            CF.Sonify.fx('tick', {});
+          }
+          if (freeMode) {
+            const marks = {}; sel.forEach(k => { marks[k] = 'cmp'; });
+            paint(sceneFor(marks));
+            aux.innerHTML = sel.length
+              ? `Tapped ${sel.slice().sort((a, b) => a - b).join(', ')} — keep exploring, then continue when you feel the shape of it.`
+              : promptTxt;
+            return;
+          }
           evaluate();
         });
       });
     }
 
+    function celebrate(l, r, msg) {
+      solved = true;
+      CF.Sonify.fx('win', {});
+      const marks = {};
+      if (mode === 'stretch') for (let k = l; k <= r; k++) marks[k] = 'win';
+      else { marks[l] = 'win'; marks[r] = 'win'; }
+      const st = sceneFor(marks).state;
+      st.aux = mathChips(l, r, 'win').concat([{ label: 'solved', value: '✓', done: true }]);
+      paint({ state: st, fx: { dim: false, ring: [l, r].filter(n => n != null), arc: (r - l > 0) ? [l, r] : null, token: true, color: '#fbbf24' } });
+      aux.innerHTML = msg;
+      nextBtn.disabled = false;
+      if (nextBtn.animate) nextBtn.animate(
+        [{ transform: 'scale(1)' }, { transform: 'scale(1.07)' }, { transform: 'scale(1)' }],
+        { duration: 420, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+    }
+
+    function reject(l, r, msg, opts) {
+      opts = opts || {};
+      attempts++;
+      const mySeq = ++seq; /* this rejection owns the timeline from now on */
+      CF.Sonify.fx(opts.soft ? 'grow' : 'buzz', {});
+      const marks = {};
+      if (opts.keepWindow && mode === 'stretch') for (let k = l; k <= r; k++) marks[k] = 'out';
+      paint(sceneFor(marks, opts.arc ? { dim: false, ring: [l, r], arc: [l, r], color: '#f87171' } : null));
+      shakeCells([l, r]);
+      aux.innerHTML = msg + (attempts >= 3 && !opts.soft
+        ? '<br><span class="lsn-prob-hint">💡 Hint: ' + esc(opts.hint || 'look at the extremes first — the answer usually hides at the edges.') + '</span>'
+        : '');
+      /* selection stays visible for a beat, then clears for a fresh try.
+         FREEZE FIX: the old clear timer fired even when the learner had
+         already solved or started a new attempt mid-wait — the stage got
+         stomped back to an empty scene under their fingers and taps
+         appeared dead ("frozen"). Guarded by a sequence token now. */
+      setTimeout(() => {
+        if (solved || mySeq !== seq) return;
+        sel = [];
+        paint(sceneFor({}, null));
+      }, 900);
+    }
+
     function evaluate() {
-      if (sel.length < 2) { paint('cmp'); aux.innerHTML = 'One more…'; return; }
-      const [x, y] = sel;
-      if (pb.mode === 'pair') {
-        const s = pb.arr[x] + pb.arr[y];
+      if (sel.length === 0) { paint(sceneFor({})); aux.innerHTML = promptTxt; return; }
+      if (sel.length < 2) {
+        /* single pick: show its live contribution instead of dead air */
+        const st = sceneFor({ [sel[0]]: 'cmp' }).state;
+        st.aux = mathChips(sel[0], sel[0]);
+        paint({ state: st, fx: { dim: false, pulse: sel[0], color: '#22d3ee' } });
+        aux.innerHTML = mode === 'pair'
+          ? `Picked <b>${pb.arr[sel[0]]}</b> — now tap its partner (one more tile).`
+          : mode === 'stretch'
+            ? `Window opens at <b>${sel[0]}</b> — tap the LAST cell of the stretch.`
+            : 'One tile marked — tap the other end.';
+        return;
+      }
+      const l = Math.min(sel[0], sel[1]), r = Math.max(sel[0], sel[1]);
+
+      if (mode === 'pair') {
+        const s = pb.arr[l] + pb.arr[r];
         if (s === pb.target) {
-          solved = true;
-          CF.Sonify.fx('win', {});
-          paint('win');
-          aux.innerHTML = `✓ ${pb.arr[x]} + ${pb.arr[y]} = ${pb.target}. ${esc(pb.punch)}`;
-          nextBtn.disabled = false;
+          celebrate(l, r, `✓ ${pb.arr[l]} + ${pb.arr[r]} = ${pb.target}. ${esc(pb.punch)}`);
         } else {
-          CF.Sonify.fx('buzz', {});
-          sel = []; /* fresh attempt: clear the wrong pair */
-          paint('cmp');
-          aux.innerHTML = `${pb.arr[x]} + ${pb.arr[y]} = ${s} — not ${pb.target}. Tap two fresh cells.`;
+          reject(l, r,
+            `<b>${pb.arr[l]} + ${pb.arr[r]} = ${s}</b> — ${s > pb.target ? 'too big' : 'too small'}, not ${pb.target}. Two fresh tiles.`,
+            { hint: `the pair must balance around ${pb.target / 2} — aim wide, then close in.` });
         }
-      } else if (pb.mode === 'ends') {
-        if (Math.min(x, y) === 0 && Math.max(x, y) === pb.arr.length - 1) {
-          solved = true;
-          CF.Sonify.fx('win', {});
-          paint('win');
-          aux.innerHTML = `✓ The two ends trade places — that is primitive 3, the in-place swap. ${esc(pb.punch)}`;
-          nextBtn.disabled = false;
+      } else if (mode === 'ends') {
+        if (l === 0 && r === pb.arr.length - 1) {
+          celebrate(l, r, `✓ The two ends trade places — that is primitive 3, the in-place swap. ${esc(pb.punch)}`);
         } else {
-          CF.Sonify.fx('buzz', {});
-          sel = [];
-          paint('cmp');
-          aux.innerHTML = 'Not those two — which pair trades places FIRST?';
+          reject(l, r, 'Not those two — <b>which pair trades places FIRST?</b>',
+            { hint: 'the outermost pair goes first; inner pairs wait their turn.' });
         }
       } else {
-        const l = Math.min(x, y), r = Math.max(x, y);
         const cells = pb.arr.slice(l, r + 1);
         const s = cells.reduce((a, b) => a + b, 0);
         const len = r - l + 1;
-        if (pb.query) { /* exact stretch asked for */
+        if (pb.query) {
           if (l === pb.query[0] && r === pb.query[1]) {
-            solved = true;
-            CF.Sonify.fx('win', {});
-            paint('win');
-            aux.innerHTML = `✓ ${s}. But notice — you had to walk ${len} cells, and the NEXT question would walk them all again. ${esc(pb.punch)}`;
-            nextBtn.disabled = false;
+            celebrate(l, r, `✓ Sum ${s}. But notice — you walked ${len} cells, and the NEXT question would walk them all again. ${esc(pb.punch)}`);
           } else {
-            CF.Sonify.fx('buzz', {});
-            sel = [];
-            paint('cmp');
-            aux.innerHTML = `That is cells ${l}…${r}, not ${pb.query[0]}…${pb.query[1]}. Tap cells ${pb.query[0]} and ${pb.query[1]}.`;
+            reject(l, r, `That is cells ${l}…${r}, not ${pb.query[0]}…${pb.query[1]}. Tap cells <b>${pb.query[0]}</b> and <b>${pb.query[1]}</b>.`,
+              { keepWindow: true, hint: 'count from zero: the first cell is index 0.' });
           }
-        } else { /* shortest stretch reaching target */
-          if (s >= pb.target) {
-            if (len === pb.winLen) {
-              solved = true;
-              CF.Sonify.fx('win', {});
-              paint('win');
-              aux.innerHTML = `✓ ${s} with only ${len} rooms — nothing shorter exists. ${esc(pb.punch)}`;
-              nextBtn.disabled = false;
-            } else {
-              CF.Sonify.fx('grow', {});
-              sel = [];
-              paint('cmp');
-              aux.innerHTML = `Valid — ${s} ≥ ${pb.target}, but that took ${len} rooms. The best answer is shorter. Tap a fresh pair.`;
-            }
+        } else {
+          if (s >= pb.target && len === pb.winLen) {
+            celebrate(l, r, `✓ ${s} with only ${len} rooms — nothing shorter exists. ${esc(pb.punch)}`);
+          } else if (s >= pb.target) {
+            reject(l, r, `Valid — <b>${s} ≥ ${pb.target}</b>, but that took ${len} rooms. The best answer is shorter.`,
+              { keepWindow: true, soft: true, arc: true, hint: `the winning window spans ${pb.winLen} rooms — slide yours tighter.` });
           } else {
-            CF.Sonify.fx('buzz', {});
-            sel = [];
-            paint('cmp');
-            aux.innerHTML = `${s} < ${pb.target} — not enough yet. Tap a fresh, wider stretch.`;
+            reject(l, r, `<b>${s} &lt; ${pb.target}</b> — not enough yet. Tap a wider stretch.`,
+              { keepWindow: true, soft: true, arc: true, hint: 'widen the window until the running sum crosses the target.' });
           }
         }
       }
     }
 
-    paint('cmp');
+    paint(sceneFor({}));
     nextBtn.addEventListener('click', () => renderBrute(container, session));
   }
 
@@ -2283,9 +2276,9 @@ CF.Lessons = (() => {
   function watchStepsFromIdea(sc) {
     const steps = sc.idea.steps;
     const out = [];
-    /* POLISH #8: the intro step now carries its OWN choreography — a halo
-       pulse under the first in-play pointer plus rings on everything already
-       marked. The walkthrough opens with motion instead of a static frame. */
+    /* POLISH #8: the intro step carries its OWN choreography — a halo
+       pulse under the first in-play pointer plus rings on everything
+       already marked. The walkthrough opens with motion, not a static frame. */
     let firstRing = [], firstPulse = null;
     for (const st of steps) {
       const p = (st.state && st.state.ptrs) || {};
@@ -2320,74 +2313,12 @@ CF.Lessons = (() => {
       const rev = { line: -1, caption: '→ ' + st.word, narration: st.word + '. ' + (st.why || st.text), state: st.state };
       if (st.fx) rev.fx = st.fx;
       if (st.sceneFx) rev.sceneFx = st.sceneFx; /* hand-authored beats auto-diff */
-      /* MANIM-STYLE CHOREOGRAPHY: derive sceneFx from the state DIFF between
-         this reveal and the previous one — changed cells get pulsing rings,
-         pointer moves draw a self-drawing arc with a travelling packet, and
-         everything outside the move dims into the background. */
-      rev.sceneFx = bespokeFx(st) || diffSceneFx(prev, st.state);
       out.push(rev);
     });
     return out;
   }
 
-  /* Bespoke choreography: lesson authors can attach st.sceneFx = { ring?, arc?:[from,to], glide?, token?, pulse?, dim?, color? }
-     to any idea step; those win over the auto-derived diff so a hand-timed
-     moment (the swap arc on pass 1, the window glow at discovery) always lands. */
-  function bespokeFx(st) {
-    const f = (st && st.sceneFx) || (st && typeof st.fx === 'object' && !st.fx.type ? st.fx : null);
-    if (!f || typeof f !== 'object' || f.type) return null; /* string fx = sonify only */
-    const fx = {};
-    if (f.ring) fx.cells = [].concat(f.ring);
-    if (f.arc && f.arc.length === 2) { fx.arc = true; fx.glide = !!f.glide; fx.token = !!f.token; fx.from = f.arc[0]; fx.to = f.arc[1]; }
-    if (f.pulse != null) fx.pulse = f.pulse;
-    if (f.color) fx.color = f.color;
-    fx.dim = f.dim !== false;
-    if (!fx.cells && !fx.arc && fx.pulse == null) return null;
-    if (fx.dim && !fx.cells && fx.arc) fx.cells = [];
-    return fx;
-  }
 
-  /* Compute a sceneFx descriptor by comparing two states (3b1b "what moved?"). */
-  function diffSceneFx(prev, cur) {
-    if (!cur || !Array.isArray(cur.arr)) return null;
-    const fx = {};
-    const changed = [];
-    const pArr = Array.isArray(prev && prev.arr) ? prev.arr : cur.arr;
-    cur.arr.forEach((v, i) => { if (pArr[i] !== v) changed.push(i); });
-    /* pointer movement → arc + glide between old and new index */
-    const pm = ['l', 'r', 'i', 'j', 'w', 'k', 'lo', 'hi', 'left', 'right', 'L', 'R'];
-    let arc = null;
-    if (prev && prev.ptrs && cur.ptrs) {
-      for (const k of pm) {
-        if (cur.ptrs[k] != null && prev.ptrs[k] != null && cur.ptrs[k] !== prev.ptrs[k]) {
-          arc = { from: prev.ptrs[k], to: cur.ptrs[k] }; break;
-        }
-      }
-    }
-    /* mark changes also count as "in play" */
-    const mkChanged = [];
-    const pMk = (prev && prev.marks) || {}, cMk = cur.marks || {};
-    cur.arr.forEach((_, i) => { if ((pMk[i] || '') !== (cMk[i] || '')) mkChanged.push(i); });
-    const cells = [...new Set([...changed, ...mkChanged])];
-    /* POLISH #6: one-pointer hops stay subtle — a plain gliding dot. A value
-       actually being carried (a cell's number changed) rides a labelled TOKEN
-       instead, which reads as "this number moved", not "a cursor twitched". */
-    if (arc) {
-      const carryIdx = changed.filter(i => i === arc.from || i === arc.to);
-      fx.arc = true; fx.from = arc.from; fx.to = arc.to;
-      fx.token = carryIdx.length > 0;
-      fx.glide = !fx.token;
-      if (fx.token) fx.color = '#fbbf24'; else fx.color = 'rgba(251,191,36,.75)';
-    }
-    if (cells.length) { fx.cells = cells.slice(0, 6); }
-    /* POLISH #7: no move detected → don't dim the whole board into the
-       background; a still frame deserves no choreography at all. */
-    if (arc || cells.length) { fx.dim = true; if (!fx.cells) fx.cells = []; }
-    if (arc && fx.cells) { /* keep arc endpoints bright too */
-      [fx.from, fx.to].forEach(i => { if (!fx.cells.includes(i)) fx.cells.push(i); });
-    }
-    return (fx.arc || fx.cells) ? fx : null;
-  }
 
   /* ── Skill-tree metadata for sheet lessons (tier = dependency depth) ── */
   const SHEET_META = {
@@ -2407,7 +2338,7 @@ CF.Lessons = (() => {
     const note = (NEW_DATA.SHEET_NOTES || {})[id] || '';
     const wt = watchStepsFromIdea(sc);
     const mkWatch = () => buildTrace({ code: sc.codeMap.lines.map(l => l.code), steps: wt }, 'watch');
-    const mkDrive = () => buildTrace({ code: sc.codeMap.lines.map(l => l.code), steps: sc.idea.steps.map(st => ({ line: -1, caption: st.word, narration: st.text, state: st.state, fx: st.fx })) }, 'drive');
+    const mkDrive = () => buildTrace({ code: sc.codeMap.lines.map(l => l.code), steps: sc.idea.steps.map(st => ({ line: -1, caption: st.word, narration: st.text, state: st.state, fx: st.fx, sceneFx: st.sceneFx })) }, 'drive');
     return {
       id,
       pattern: id,
@@ -2596,7 +2527,7 @@ CF.Lessons = (() => {
         chkHost.innerHTML = '';
         cancelCp = mountCheckpoint(player, chkHost, s.predict, (res) => {
           cancelCp = null;
-          if (res && res.right !== null) {
+          if (res && (res.right !== null || res.resumed)) {
             chkHost.classList.add('lsn-market-done');
             setTimeout(() => { try { player.play(); } catch (e) {} }, 900);
           }
@@ -2659,10 +2590,17 @@ CF.Lessons = (() => {
     function show() {
       const st = idea.steps[i];
       guessEl.innerHTML = '';
-      CF.Visualizer.glideScene(stage, st.state);
-      try { if (st.fx) CF.Sonify.fx(st.fx.type, { ...st.fx, arr: st.state?.arr || [] }); } catch (e) {}
       badge.textContent = st.word;
+      /* BADGE POP: the action word slams in with an overshoot bounce */
+      if (badge.animate) {
+        badge.animate([
+          { transform: 'scale(.4) rotate(-4deg)', opacity: 0 },
+          { transform: 'scale(1.12) rotate(1deg)', opacity: 1, offset: .6 },
+          { transform: 'scale(1) rotate(0)' }
+        ], { duration: 420, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+      }
       textEl.innerHTML = esc(st.text) + (st.why ? `<div class="lsn-idea-why">${esc(st.why)}</div>` : '');
+      if (textEl.animate) textEl.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 350, easing: 'ease-out' });
       CF.Narrator.speak(st.text + (st.why ? ' ' + st.why : ''));
       chips.querySelectorAll('.lsn-word-chip').forEach(c => {
         const k = Number(c.dataset.k);
@@ -2670,6 +2608,35 @@ CF.Lessons = (() => {
       });
       backBtn.disabled = i === 0;
       nextBtn.textContent = i === idea.steps.length - 1 ? 'Continue: trigger words ▶' : 'Next ▶';
+
+      /* LIVING IDEA STAGE: the mini-scene is animated by the SAME engine as
+         the Watch player — persistent cells, gliding pointers, and the
+         lesson's hand-authored sceneFx beats (rings / dim focus / arcs with
+         a value riding from pointer to cell). The Idea phase now shows the
+         exact motion the Watch phase will narrate. */
+      if (stage && st.state) {
+        const prevSt = i > 0 ? idea.steps[i - 1].state : null;
+        CF.Visualizer.renderScene(stage, st.state, { fx: st.sceneFx || diffFx(prevSt, st.state, st.fx) });
+      }
+    }
+
+    /* auto-diff choreography for the idea stage (mirrors the player's) */
+    function diffFx(prev, cur, sfx) {
+      if (!prev || !cur) return null;
+      const arr = cur.arr || [], parr = prev.arr || [];
+      if (arr.length !== parr.length) return null;
+      const changed = [];
+      for (let k = 0; k < arr.length; k++) if (String(arr[k]) !== String(parr[k])) changed.push(k);
+      const ring = [...new Set(changed.concat(Object.keys(cur.marks || {}).map(Number)).filter(n => !Number.isNaN(n)))].slice(0, 6);
+      const pp = prev.ptrs || {}, cp = cur.ptrs || {};
+      const moved = Object.keys(cp).filter(id => pp[id] != null && pp[id] !== cp[id]);
+      if (!ring.length && !moved.length) return null;
+      const fx = { dim: true, ring, cells: ring };
+      if (moved.length) { fx.pulse = Math.max(0, Math.min(cp[moved[0]], arr.length - 1)); fx.color = '#22d3ee'; }
+      if (changed.length === 1 && sfx && (sfx.type === 'write' || sfx.type === 'swap') && moved.length) {
+        fx.arc = [pp[moved[0]], changed[0]]; fx.token = true;
+      }
+      return fx;
     }
 
     /* retrieval practice: the stage still shows the previous state —
@@ -3008,7 +2975,7 @@ CF.Lessons = (() => {
     const show = () => {
       if (k >= cm.lines.length) { btn.style.display = 'none'; return; }
       const l = cm.lines[k];
-      CF.Visualizer.glideScene(stage, ideaByWord[l.word] || { arr: [], ptrs: {}, marks: {} });
+      CF.Visualizer.renderScene(stage, ideaByWord[l.word] || { arr: [], ptrs: {}, marks: {} });
       codePre.innerHTML = cm.lines.map((x, i) =>
         `<span class="${i === k ? 'cam-on' : (i < k ? 'cam-done' : 'cam-off')}">${esc(x.code)}</span>`).join('\n');
       capEl.innerHTML = `<b>${esc(l.word)}</b> → <code>${esc(l.code)}</code> · ${esc(l.note)}`;
@@ -3037,14 +3004,28 @@ CF.Lessons = (() => {
        silently below the code. */
   function mountCheckpoint(player, host, predict, onSettled) {
     let alive = true;
+    const t0 = Date.now();
+    /* FREEZE FIX: the old poll waited on narrationIdle() with NO deadline.
+       If the voice engine wedged (speechSynthesis.speaking stuck true),
+       the 🤔 card never mounted and the lesson sat frozen at the first
+       checkpoint forever. Voice-lock is a nicety — it may delay the card,
+       it must never strand the lesson. */
+    const MAX_WAIT = 6000; /* was 15 s: long enough for any intro sentence
+       to hit its estimate cap, short enough that no learner ever sees a
+       "frozen" screen waiting on a wedged voice engine */
+    const mountNow = () => {
+      if (!alive) return;
+      alive = false;
+      if (!host || !host.isConnected) return; /* phase changed */
+      mountMarket(host, predict, onSettled);
+      try { host.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+    };
     const poll = () => {
       if (!alive) return;
       if (!host || !host.isConnected) { alive = false; return; } /* phase changed */
+      if (Date.now() - t0 >= MAX_WAIT) { mountNow(); return; }   /* voice wedged → go anyway */
       if (!(player && player.narrationIdle())) { setTimeout(poll, 200); return; }
-      mountMarket(host, predict, onSettled);
-      try {
-        host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      } catch (e) {}
+      mountNow();
     };
     setTimeout(poll, 200);
     return () => { alive = false; };
@@ -3066,6 +3047,20 @@ CF.Lessons = (() => {
     const optsBox = host.querySelector('.lsn-market-opts');
     const fb = host.querySelector('.lsn-market-fb');
     let settled = false;
+    const addContinue = () => {
+      /* ESCAPE HATCH: the walkthrough resumes automatically ~900 ms after
+         settling — but if that chain ever dies (tab backgrounded, timer
+         throttled, wedged voice), this button guarantees forward motion.
+         A lesson must never be able to freeze on a checkpoint. */
+      const cont = document.createElement('button');
+      cont.className = 'vz-opt continue lsn-market-cont';
+      cont.textContent = 'Continue ▶';
+      cont.addEventListener('click', () => {
+        if (onSettled) onSettled({ resumed: 'manual' });
+      });
+      fb.appendChild(document.createElement('br'));
+      fb.appendChild(cont);
+    };
     const settle = (i) => {
       if (settled) return;
       settled = true;
@@ -3074,7 +3069,7 @@ CF.Lessons = (() => {
         xpAdd(-STAKE);                       /* stake leaves the purse */
         if (right) xpAdd(STAKE + BONUS);     /* winner takes stake back + bonus */
       }
-      const buttons = optsBox.querySelectorAll('.vz-opt');
+      const buttons = optsBox.querySelectorAll('.vz-opt:not(.continue)');
       buttons.forEach((o, j) => { o.disabled = true; if (j === predict.correct) o.classList.add('right'); });
       if (buttons[i]) buttons[i].classList.add(right ? 'right' : 'wrong');
       CF.Sonify.fx(right ? 'win' : 'buzz', {});
@@ -3083,6 +3078,7 @@ CF.Lessons = (() => {
           ? `✅ Settled in your favor.${canStake ? ` +${BONUS} XP.` : ''}`
           : `❌ Settled against you.${canStake ? ` −${STAKE} XP — queued for review.` : ' Queued for review.'}`}<br>${esc(predict.why)}`;
       if (onSettled) onSettled({ right, predict });
+      addContinue();
     };
     predict.options.forEach((opt, i) => {
       const b = document.createElement('button');
@@ -3097,10 +3093,11 @@ CF.Lessons = (() => {
     skip.addEventListener('click', () => {
       if (settled) return;
       settled = true;
-      optsBox.querySelectorAll('.vz-opt').forEach((o, j) => { o.disabled = true; if (j === predict.correct) o.classList.add('right'); });
+      optsBox.querySelectorAll('.vz-opt:not(.continue)').forEach((o, j) => { o.disabled = true; if (j === predict.correct) o.classList.add('right'); });
       fb.className = 'lsn-market-fb';
       fb.innerHTML = `⏭ No stake placed. ${esc(predict.why)}`;
       if (onSettled) onSettled({ right: null, predict });
+      addContinue();
     });
     host.appendChild(skip);
   }
@@ -3142,10 +3139,12 @@ CF.Lessons = (() => {
           marketHost.classList.remove('lsn-market-done');
           cancelCp = mountCheckpoint(player, marketHost, s.predict, (res) => {
             cancelCp = null;
-            if (res && res.right !== null) {
+            if (res && res.right !== null && !res.resumed) {
               stats.predicts.total++;
               if (res.right) stats.predicts.right++;
-              /* learner answered → resume the walkthrough automatically */
+            }
+            if (res && (res.right !== null || res.resumed)) {
+              /* learner answered (or pressed Continue) → resume the walkthrough */
               marketHost.classList.add('lsn-market-done');
               setTimeout(() => { try { player.play(); } catch (e) {} }, 900);
             }
@@ -3415,7 +3414,9 @@ CF.Lessons = (() => {
     try {
       S.profile.lessons = S.profile.lessons || {};
       const first = !S.profile.lessons[ls.id]?.completed;
-      const xp = first ? 40 : 10;
+      // XP boost: if a chest multiplier is active, lesson XP rides it too.
+      const baseXP = first ? 40 : 10;
+      const xp = (window.CF && CF.Rewards) ? CF.Rewards.applyXPBoost(baseXP) : baseXP;
       const coins = first ? 20 : 0;
       S.addXP(xp);
       if (coins) S.addCoins(coins);
@@ -3455,6 +3456,13 @@ CF.Lessons = (() => {
       renderPicker(container);
     });
     container.querySelector('#lsnFight').addEventListener('click', () => handlers.onFight(ls.id));
+
+    /* 🎁 Variable-reward chest: fires once per lesson, first time only.
+       The roll already happened server-side-style inside showChest; the
+       prize is granted when the learner taps OPEN IT. */
+    if (window.CF && CF.Rewards && reward && reward.first) {
+      setTimeout(() => { try { CF.Rewards.showChest({ context: ls.title + ' complete' }); } catch (e) {} }, 900);
+    }
   }
 
   /* ── PUBLIC ENTRY ── */
