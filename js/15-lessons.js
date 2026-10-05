@@ -1079,6 +1079,29 @@ CF.Lessons = (() => {
       hookTitle: 'Six moves build everything',
       hookText: 'Every array algorithm in this course — converging pointers, sliding windows, prefix sums — is assembled from the same six tiny code primitives: named pointers, guarded loop bounds, in-place swaps, read & write pointers, running state, and guarded skipping. Learn the moves once, and every pattern after this is just choreography.',
       hookNarration: 'Every array algorithm in this course is assembled from six tiny primitives: named pointers, guarded bounds, in-place swaps, read and write pointers, running state, and guarded skipping. Learn the moves once — every pattern after this is choreography.',
+      imagine: {
+        text: 'A conveyor belt of letter tiles slides past your hands. You may only ever touch the two tiles at the very ends — grab one from each side, trade them, pull your hands inward. That single physical rule, repeated, reverses ANY word. Six tiny moves like that are hiding inside every algorithm in this course.',
+        scene: { arr: ['p', 'y', 't', 'h', 'o', 'n'], ptrs: { L: 0, R: 5 }, marks: {} }
+      },
+      wrongPath: {
+        title: 'The lazy guard — a wrong path worth walking',
+        code: [
+          'def reverse(s):',
+          '    L, R = 0, len(s) - 1',
+          '    while L < R:',
+          '        s[L], s[R] = s[R], s[L]',
+          '        L += 1; R -= 1',
+          '    return s'
+        ],
+        steps: [
+          { line: 1, state: { arr: [], ptrs: {}, marks: {} }, caption: 'Try it on an EMPTY row.', narration: 'Wrong-path tour one: hand us an empty row. The lazy version skips the guard entirely and computes R as minus one.' },
+          { line: 2, state: { arr: [], ptrs: { L: 0, R: -1 }, marks: {}, aux: [{ label: 'L < R', value: 'false — saved!' }] }, caption: 'while L < R → false immediately.', narration: 'Here the strict bound rescues it: zero is never less than minus one, so the loop body never runs. Lucky — not safe.' },
+          { line: 3, state: { arr: ['a'], ptrs: { L: 0, R: 0 }, marks: { 0: 'cmp' }, aux: [{ label: 'L < R', value: 'false — also saved' }] }, caption: 'One tile: hands start together.', narration: 'Tour two: exactly one tile. Both hands land on index zero, L equals R, the bound says stop. Still no crash.' },
+          { line: 4, state: { arr: ['a'], ptrs: { L: 0, R: 0 }, marks: { 0: 'win' }, aux: [{ label: 'swap', value: 'a ↔ a (wasted)' }] }, caption: 'Change the bound to <= and the middle swaps with itself.', narration: 'But flip the bound to inclusive and the lone middle tile swaps with itself — wasted work. Strict versus inclusive was not style after all.' },
+          { line: 0, state: { arr: [], ptrs: {}, marks: {}, aux: [{ label: 'the real crash', value: 'len(s) − 1 on empty' }] }, caption: 'So why keep the guard?', narration: 'Then where does the lazy version actually die? Nowhere in this loop — it dies the moment you extend the pattern: skip loops that read before checking bounds walk off the array. The guard costs one line; forgetting the discipline costs the whole program.' }
+        ],
+        punch: 'This wrong path survives by luck of the strict bound. Patterns fail quietly first — then loudly. Keep the guard; keep the discipline.'
+      },
       objectives: [
         'Initialize pointers the three ways: opposite ends, same direction, anchor & runner',
         'Choose loop bounds deliberately — strict < versus inclusive <=',
@@ -1150,6 +1173,12 @@ CF.Lessons = (() => {
       bug: () => primitivesBugTrace([2, 0, 0, 0]),
       practice: () => primitivesTrace(['a', 'r', 'r', 'a', 'y'], 'drive'),
       invariant: 'The six primitives share one promise: an index only ever points where it is legal to point. The guard runs before the first touch, the bound runs before every step, and the overwrite rule only fires where w ≤ r — nothing is ever destroyed before it has been read.',
+      proof: {
+        claim: 'After every swap-and-step, all cells OUTSIDE the hands are final, and no cell inside has been touched twice.',
+        basis: 'Before the loop starts, nothing is final and nothing is touched — true by default.',
+        step: 'Each iteration swaps s[L] with s[R], then moves the hands inward. Both retired cells were never paired before (the hands had not passed them), and will never be paired again (the hands move only inward). So exactly two more cells become final, each after ONE swap.',
+        end: 'The loop stops when L ≥ R: zero cells remain between the hands, so ALL cells are final. Three swaps for six tiles — never four.'
+      },
       explain: {
         question: 'In your own words: why must the bounds check come FIRST in every skip loop — while r < n and junk — and not second?',
         fallback: {
@@ -1174,6 +1203,29 @@ CF.Lessons = (() => {
       hookTitle: 'Two friends, one sorted shelf',
       hookText: 'Two friends stand at opposite ends of a sorted shelf of numbered boxes. They want one box each, with a target total. Instead of checking every pair, they look only at THEIR two boxes — and every look lets one of them safely walk away. That is the whole pattern.',
       hookNarration: 'Two friends stand at opposite ends of a sorted shelf. Each look at their own two boxes is enough for one of them to safely walk away. That is the entire pattern.',
+      imagine: {
+        text: 'A long shelf, sorted light-to-heavy, and two robots at opposite ends. They may only ever read THEIR two boxes — but each reading lets exactly one robot quit forever. On a shelf of a hundred thousand boxes, no robot walks more than a hundred thousand steps in total. Watch them close in.',
+        scene: { arr: [2, 7, 11, 15], ptrs: { L: 0, R: 3 }, marks: {}, aux: [{ label: 'target', value: 9 }] }
+      },
+      wrongPath: {
+        title: 'The overconfident shrink — same code, unsorted shelf',
+        code: [
+          'L, R = 0, len(nums) - 1',
+          'while L < R:',
+          '    s = nums[L] + nums[R]',
+          '    if s == target: return [L+1, R+1]',
+          '    elif s > target: R -= 1   # ← guilty verdict',
+          '    else: L += 1'
+        ],
+        steps: [
+          { line: 0, state: { arr: [10, 2, 3, 8], ptrs: { L: 0, R: 3 }, marks: {}, aux: [{ label: 'target', value: 5 }] }, caption: 'Feed it an UNSORTED row: [10, 2, 3, 8], target 5.', narration: 'Wrong-path tour: the same code, but the shelf was never sorted. The answer pair, two plus three, is hiding in the middle.' },
+          { line: 2, state: { arr: [10, 2, 3, 8], ptrs: { L: 0, R: 3 }, marks: { 0: 'cmp', 3: 'cmp' }, aux: [{ label: 'target', value: 5 }, { label: 'sum', value: 18 }] }, caption: 'First look: 10 + 8 = 18 — too big.', narration: 'First reading: ten plus eight makes eighteen. Too big.' },
+          { line: 4, state: { arr: [10, 2, 3, 8], ptrs: { L: 0, R: 2 }, marks: { 3: 'out', 0: 'cmp', 2: 'cmp' }, aux: [{ label: 'verdict', value: '8 retired — WRONG' }] }, caption: 'The shrink fires: 8 is discarded forever.', narration: 'Here the lie detonates. The rule says eight is hopeless because every partner is bigger — but on an unsorted shelf that is false. Two sits right next to it.' },
+          { line: 5, state: { arr: [10, 2, 3, 8], ptrs: { L: 1, R: 2 }, marks: { 3: 'out', 0: 'out', 1: 'cmp', 2: 'win' }, aux: [{ label: 'missed', value: '2 + 3 = 5 ✓' }] }, caption: 'It stumbles onto 2 + 3 by luck — but 8 died before this moment existed.', narration: 'It happens to bump into two plus three next — pure luck. Eight was already buried; pairs like eight plus minus three can never be found again. Discarded values are gone forever.' },
+          { line: 4, state: { arr: [10, 2, 3, 8], ptrs: { L: 0, R: 2 }, marks: { 3: 'out' }, aux: [{ label: 'the assumption', value: 'sorted order' }] }, caption: 'One line carries the whole pattern.', narration: 'One comment line carried the entire pattern: the verdict is only legal under sorted order. Sort first, or use a hash map — but never run this shrink blind.' }
+        ],
+        punch: 'The bug phase showed this crash live. Now you know WHY line 4 is the load-bearing wall: sorted order is not decoration — it is the license to discard.'
+      },
       objectives: [
         'See why a too-big sum lets you discard the RIGHT value forever',
         'Predict each move before the animation makes it',
@@ -1241,6 +1293,12 @@ CF.Lessons = (() => {
       bug: () => twoSumBugTrace([10, 2, 3, 8], 5),
       practice: () => twoSumTrace([3, 5, 8, 11, 14, 17], 19, 'drive'),
       invariant: 'Sorted order guarantees: if nums[L]+nums[R] > target, then nums[R] paired with L (or with ANY later, larger L-value) always overshoots — nums[R] can never be in a valid pair, so discarding it loses nothing. Symmetrically for a too-small sum with nums[L].',
+      proof: {
+        claim: 'If the loop ever ends without returning, NO valid pair exists anywhere in the array.',
+        basis: 'At start, every index lies between the hands — nothing has been discarded, nothing missed. True by default.',
+        step: 'Suppose a sum is too big and we retire R. For any i ≥ L, sortedness gives nums[i] ≥ nums[L], so nums[i] + nums[R] ≥ nums[L] + nums[R] > target. No partner left of the shelf can rescue R — the retired cell was in NO valid pair. Every other move only shrinks the live window; no valid pair ever crossed a retiring hand.',
+        end: 'When the hands meet, every cell is either final or retired-proven-useless. Zero candidates remain — "not found" is now a PROVEN answer, not a guess.'
+      },
       explain: {
         question: 'In your own words: why is it always safe to move R left when the sum is too big?',
         fallback: {
@@ -1265,6 +1323,31 @@ CF.Lessons = (() => {
       hookTitle: 'A worm, not a scanner',
       hookText: 'A brute-force scan checks every starting point. A window does something smarter: it crawls. New elements enter on the right, old ones fall off on the left, and nothing is ever visited twice. You will see WHY the "wasted work" disappears.',
       hookNarration: 'A brute force scan checks every starting point. A window crawls: elements enter on the right, fall off on the left, and nothing is ever visited twice.',
+      imagine: {
+        text: 'A glowing worm crawling along a row of hot coals. It eats one coal at its tail and spits it out at its head — its body is always exactly the stretch it is standing on. To find the shortest stretch that reaches a target, you never re-measure anything: the worm only ever adds one coal or removes one. Every coal enters once, leaves once.',
+        scene: { arr: [2, 3, 1, 5, 7, 1], ptrs: { L: 0, R: 0 }, marks: { 0: 'win' }, aux: [{ label: 'window', value: '[2]' }, { label: 'total', value: 2 }] }
+      },
+      wrongPath: {
+        title: 'The greedy reset — a wrong path worth walking',
+        code: [
+          'L = 0; total = 0',
+          'for R in range(n):',
+          '    total += nums[R]',
+          '    if total < target:',
+          '        L = 0; total = 0   # ← the lie: restart from scratch',
+          '    else:',
+          '        while total - nums[L] >= target:',
+          '            total -= nums[L]; L += 1'
+        ],
+        steps: [
+          { line: 0, state: { arr: [1, 4, 1, 1, 6], ptrs: { L: 0, R: 0 }, marks: {}, aux: [{ label: 'target', value: 5 }] }, caption: 'Same input as the real lesson: [1,4,1,1,6], target 5.', narration: 'Wrong-path tour: a tempting shortcut. Whenever the window looks too small, wipe it and restart. Feels tidy. Watch what it forgets.' },
+          { line: 3, state: { arr: [1, 4, 1, 1, 6], ptrs: { L: 0, R: 1 }, marks: { 0: 'win', 1: 'win' }, aux: [{ label: 'total', value: '1 + 4 = 5 ≥ 5 ✓' }] }, caption: 'R=1: window [1,4] hits the target. Recorded.', narration: 'Step by step: one, then four — total five, legal. The greedy version records length two and feels great.' },
+          { line: 4, state: { arr: [1, 4, 1, 1, 6], ptrs: { L: 0, R: 2 }, marks: { 2: 'cmp' }, aux: [{ label: 'total', value: '6 → shrink to [4,1]… wait' }] }, caption: 'It shrinks L past 1 — but never asks: could the window have started INSIDE?', narration: 'Now the subtle damage. The greedy loop shrinks from the left whenever legal, but after any reset it starts counting from zero again — windows like four plus one are re-measured from scratch, and worse, some never get measured at all.' },
+          { line: 2, state: { arr: [1, 4, 1, 1, 6], ptrs: { L: 3, R: 4 }, marks: { 3: 'out', 4: 'win' }, aux: [{ label: 'missed', value: '[1,1,6]? vs [6] alone' }] }, caption: 'After a reset, cells already scanned are re-added — O(N²) sneaks back in.', narration: 'Every reset throws away the running total — the ONE thing that made the window O of N. Cells get re-added cell by cell. The crawl silently becomes the scanner we came to escape.' },
+          { line: 0, state: { arr: [1, 4, 1, 1, 6], ptrs: {}, marks: {}, aux: [{ label: 'the lesson', value: 'never let go of the sum' }] }, caption: 'The real pattern NEVER resets: L only moves forward.', narration: 'The real sliding window never resets. Both hands move only forward, so each element enters once and leaves once. That monotone promise — not the clever shrinking — is where the speed lives.' }
+        ],
+        punch: 'Resets feel safe because they "start clean." But the running total IS the memory — throw it away and you pay for every cell twice. Positivity was the license to shrink; monotone hands are the license to be fast.'
+      },
       objectives: [
         'Watch total and window grow and shrink in sync with the code',
         'Predict what to do with a VALID window (the counter-intuitive part)',
@@ -1334,6 +1417,12 @@ CF.Lessons = (() => {
       bug: () => windowBugTrace([1, -1, 5], 5),
       practice: () => minSubarrayTrace([4, 2, 2, 7, 1, 2], 8, 'drive'),
       invariant: 'left and right each move only forward and at most N steps, so each element enters the window once and leaves at most once — the nested while loop still totals O(N). Shrinking after recording is safe because the best-so-far is already saved.',
+      proof: {
+        claim: 'Whenever the window is legal (total ≥ target), shrinking it by one from the left can NEVER destroy the shortest legal window.',
+        basis: 'At R = 0 there is exactly one window starting at zero. Nothing has been skipped.',
+        step: 'Fix a left hand L. As R grows, total crosses the target line exactly ONCE (positivity — adding numbers only ever increases the sum). The first R where total ≥ target gives the SHORTEST legal window starting at L; every later R is longer. So record it, then advance L — that window is done forever. No second pass needed.',
+        end: 'Every possible start L gets exactly one best ending R, examined in order. The global minimum over these n candidates IS the answer — nothing else was ever a contender.'
+      },
       explain: {
         question: 'The while-loop lives INSIDE the for-loop. Explain why the total work is still O(N), not O(N²).',
         fallback: {
@@ -1358,6 +1447,30 @@ CF.Lessons = (() => {
       hookTitle: 'Pay once, query forever',
       hookText: 'One pass down the array buys you every range-sum for the price of one subtraction. The entire magic is one extra zero at the front — you will watch exactly what that zero is for, and what breaks without it.',
       hookNarration: 'One pass down the array buys every range sum for the price of one subtraction. The magic is one extra zero at the front.',
+      imagine: {
+        text: 'A mile-long road with gas stations. Instead of measuring every trip between any two stations, the county paints a single odometer reading on each station: how far from the start. Now ANY distance is two painted numbers — subtract the left one from the right one. One drive down the road, and every future question costs one subtraction.',
+        scene: { arr: [1, 3, 4, 8, 6, 1, 4], ptrs: {}, marks: {}, row2: { label: 'odometer readings (prefix)', arr: [0, 1, 4, 8, 16, 22, 23, 27], marks: {} } }
+      },
+      wrongPath: {
+        title: 'The missing leading zero — an off-by-one waiting to happen',
+        code: [
+          'prefix = []            # ← no leading 0',
+          'run = 0',
+          'for x in nums:',
+          '    run += x; prefix.append(run)',
+          '',
+          'def sum_range(l, r):',
+          '    return prefix[r] - prefix[l - 1]   # ← l = 0? index −1…'
+        ],
+        steps: [
+          { line: 0, state: { arr: [5, 2, 1], ptrs: {}, marks: {}, aux: [{ label: 'build', value: 'starts EMPTY' }] }, caption: 'Build without the leading zero.', narration: 'Wrong-path tour: build the odometer but forget the zero at the front. Everything looks fine — until the first honest question.' },
+          { line: 3, state: { arr: [5, 2, 1], ptrs: {}, marks: {}, row2: { label: 'prefix (no leading 0)', arr: [5, 7, 8], marks: {} }, aux: [{ label: 'built', value: '[5, 7, 8]' }] }, caption: 'prefix = [5, 7, 8]. Looks reasonable.', narration: 'The table reads five, seven, eight. Sum of everything? Eight. Correct. Query one to two? Eight minus five, three. Correct. Suspiciously smooth so far.' },
+          { line: 5, state: { arr: [5, 2, 1], ptrs: {}, marks: {}, row2: { label: 'prefix (no leading 0)', arr: [5, 7, 8], marks: { 0: 'cmp' } }, aux: [{ label: 'query', value: 'sum(0, 1) → prefix[1] − prefix[−1]' }] }, caption: 'Now ask for the range STARTING at 0.', narration: 'Here the trap snaps shut. Ask for positions zero through one. The formula wants prefix of minus one — Python happily wraps around to the LAST cell, eight. Seven minus eight gives minus one. A silent, plausible-looking WRONG answer.' },
+          { line: 5, state: { arr: [5, 2, 1], ptrs: {}, marks: {}, row2: { label: 'prefix (no leading 0)', arr: [5, 7, 8], marks: { 2: 'out' } }, aux: [{ label: 'result', value: '−1 (should be 7!)' }] }, caption: 'No crash — just a wrong number. Worse.', narration: 'No exception, no trace, nothing red. In other languages this is undefined behavior; in Python it is worse than a crash — a confident wrong number that ships to production.' },
+          { line: 0, state: { arr: [5, 2, 1], ptrs: {}, marks: {}, row2: { label: 'prefix WITH the leading 0', arr: [0, 5, 7, 8], marks: { 0: 'win' } }, aux: [{ label: 'sum(0,1)', value: 'prefix[2] − prefix[0] = 7 ✓' }] }, caption: 'One extra zero makes every formula uniform.', narration: 'The fix is absurdly cheap: put a zero at the front. Now prefix of zero means "empty prefix" and the same subtraction works for EVERY range, including ones starting at zero. Edge cases do not get special code — they get absorbed by definition.' }
+        ],
+        punch: 'The leading zero is not decoration — it is the definition that makes prefix[i] mean "sum of the first i." Forget it and the bug hides inside correct-looking arithmetic.'
+      },
       objectives: [
         'Watch the prefix array grow, cell by cell',
         'Answer range queries with a single subtraction',
@@ -1428,6 +1541,12 @@ CF.Lessons = (() => {
         narration: 'Drop the leading zero, and queries that start at index zero either crash or silently read the wrong end of the array. The leading zero is not decoration. It is the boundary case, precomputed.'
       },
       invariant: 'prefix[i] = sum of the first i elements. sumRange(l, r) = prefix[r+1] − prefix[l]. The leading zero makes prefix[l] exist for l = 0, removing every special case.',
+      proof: {
+        claim: 'For EVERY range (l, r), prefix[r+1] − prefix[l] equals the sum of nums[l…r] — with zero special cases.',
+        basis: 'prefix[0] = 0 by definition: the empty sum. So "sum of the first zero elements" is honest before anything else exists.',
+        step: 'By construction prefix[k] = nums[0] + … + nums[k−1], growing one cell per append. Then prefix[r+1] = (nums[0]+…+nums[l−1]) + (nums[l]+…+nums[r]) — the first parenthesis IS prefix[l]. Subtract it and only the range survives. Nothing was recomputed; the overlap canceled exactly.',
+        end: 'The argument never used l > 0 anywhere — which is precisely why l = 0 works too: prefix[r+1] − prefix[0] = total − 0. One formula, n(n+1)/2 ranges, proven.'
+      },
       explain: {
         question: 'Why does the prefix array start with a 0, and why does that make every query — including ones starting at index 0 — a single subtraction?',
         fallback: {
@@ -1635,6 +1754,10 @@ CF.Lessons = (() => {
             <div class="lsn-hero-sub">${esc(ls.hookTitle)} · ${ls.minutes} min</div>
           </div>
         </div>
+        ${ls.imagine ? `<div class="lsn-imagine">
+          <div class="lsn-imagine-word">Imagine…</div>
+          <p class="lsn-imagine-text">${esc(ls.imagine.text)}</p>
+        </div>` : ''}
         <div class="lsn-card plain">
           <p class="lsn-hook">${esc(ls.hookText)}</p>
           <div class="lsn-obj-title">You will be able to:</div>
@@ -1647,6 +1770,15 @@ CF.Lessons = (() => {
         </div>
       </div>`;
     wireQuit(container, session);
+    if (ls.imagine) {
+      /* 3b1b-style opener: the imagined world fades in first, then the
+         narrator paints it while the visualizer scene glides into place */
+      const im = container.querySelector('.lsn-imagine');
+      requestAnimationFrame(() => im.classList.add('lit'));
+      CF.Narrator.speak('Imagine this. ' + ls.imagine.text + ' ' + ls.hookNarration);
+    } else {
+      CF.Narrator.speak(ls.hookNarration);
+    }
     const jump = container.querySelector('#lsnJump');
     if (jump) jump.addEventListener('click', () => renderWatch(container, session));
     container.querySelector('#lsnStart').addEventListener('click', () => {
@@ -1695,7 +1827,7 @@ CF.Lessons = (() => {
     function paint(markClass) {
       const marks = {};
       sel.forEach(i => { marks[i] = markClass; });
-      CF.Visualizer.renderScene(stage, { arr: pb.arr, ptrs: {}, marks });
+      CF.Visualizer.glideScene(stage, { arr: pb.arr, ptrs: {}, marks });
       stage.querySelectorAll('.vz-cell').forEach(cell => {
         cell.addEventListener('click', () => {
           if (solved) return;
@@ -1947,7 +2079,7 @@ CF.Lessons = (() => {
     function show() {
       const st = idea.steps[i];
       guessEl.innerHTML = '';
-      CF.Visualizer.renderScene(stage, st.state);
+      CF.Visualizer.glideScene(stage, st.state);
       try { if (st.fx) CF.Sonify.fx(st.fx.type, { ...st.fx, arr: st.state?.arr || [] }); } catch (e) {}
       badge.textContent = st.word;
       textEl.innerHTML = esc(st.text) + (st.why ? `<div class="lsn-idea-why">${esc(st.why)}</div>` : '');
@@ -2195,6 +2327,165 @@ CF.Lessons = (() => {
     container._player = player;
   }
 
+  /* ═══════════════════════════════════════════════════════ */
+  /*  SHARED PHASE WIDGETS — proof walkthrough, wrong-path   */
+  /*  tour, two-camera view, prediction market. All read     */
+  /*  lesson DATA (ls.proof / ls.wrongPath), never code.     */
+  /* ═══════════════════════════════════════════════════════ */
+
+  /* ── Loop-invariant proof: four cards revealed one click at a time ── */
+  function mountProof(host, proof) {
+    if (!host || !proof) return;
+    const parts = [
+      { key: 'claim', icon: '🎯', label: 'The claim' },
+      { key: 'basis', icon: '🌱', label: 'True at the start' },
+      { key: 'step',  icon: '🔁', label: 'One iteration preserves it' },
+      { key: 'end',   icon: '🏁', label: 'At the end… QED' }
+    ];
+    host.className = 'lsn-proof';
+    host.innerHTML = `
+      <div class="lsn-proof-head">🧷 <b>Why it is ALWAYS right — a loop-invariant proof.</b>
+        This is the skeleton key of algorithm intuition: find a promise that starts true and
+        survives every iteration, then check what is left standing when the loop stops.</div>
+      <div class="lsn-proof-claim">${esc(proof.claim)}</div>
+      <div class="lsn-proof-steps" id="pfSteps"></div>
+      <button class="btn ghost" id="pfNext">Reveal the next rung ▶</button>`;
+    const steps = host.querySelector('#pfSteps');
+    const btn = host.querySelector('#pfNext');
+    let shown = 0;
+    const show = () => {
+      if (shown >= parts.length) return;
+      const p = parts[shown];
+      const card = document.createElement('div');
+      card.className = 'lsn-proof-card reveal ' + p.key;
+      card.innerHTML = `<span class="lsn-proof-tag">${p.icon} ${p.label}</span><span>${esc(proof[p.key])}</span>`;
+      steps.appendChild(card);
+      CF.Sonify.fx('write', {});
+      CF.Narrator.speak(p.label + '. ' + proof[p.key]);
+      shown++;
+      if (shown >= parts.length) {
+        btn.style.display = 'none';
+        CF.Sonify.fx('win', {});
+      }
+    };
+    btn.addEventListener('click', show);
+    show(); /* the claim shows itself — everything else is earned by clicking */
+  }
+
+  /* ── Wrong-path tour: the same player engine, fed wp.steps as a trace ── */
+  function mountWrongPath(mountEl, ls, onDone) {
+    if (!mountEl || !ls.wrongPath) { if (onDone) onDone(); return null; }
+    const wp = ls.wrongPath;
+    const box = document.createElement('div');
+    box.className = 'flow-box';
+    box.innerHTML = `
+      <div class="flow-hint">🚧 <b>Walk the WRONG path first.</b> Here is a tempting mistake made from the SAME action words. Watch exactly where it breaks — errors build sharper models than correct demos.</div>`;
+    const inner = document.createElement('div');
+    box.appendChild(inner);
+    mountEl.appendChild(box);
+    const player = CF.Visualizer.createPlayer({
+      container: inner,
+      trace: { code: wp.code, steps: wp.steps },
+      mode: 'watch',
+      onDone: () => {
+        const p = document.createElement('div');
+        p.className = 'lsn-wp-punch';
+        p.textContent = '🚧 ' + wp.punch;
+        box.appendChild(p);
+        CF.Narrator.speak(wp.punch);
+        if (onDone) onDone();
+      }
+    });
+    setTimeout(() => player.play(), 450);
+    return player;
+  }
+
+  /* ── Two cameras: concrete world beside code, one step per click ── */
+  function mountTwoCameras(host, cm) {
+    if (!host || !cm) return;
+    host.className = 'lsn-cams';
+    host.innerHTML = `
+      <div class="lsn-cams-head">📹 <b>Two cameras, one story.</b> Left: the physical world you already watched. Right: the exact line of code that IS that move. Step through — they stay locked together.</div>
+      <div class="lsn-cams-grid">
+        <div class="lsn-cam lsn-cam-world"><div class="lsn-cam-label">🖐 The world</div><div id="camWorld"></div></div>
+        <div class="lsn-cam lsn-cam-code"><div class="lsn-cam-label">⌨️ The code</div><pre class="lsn-cam-pre" id="camCode"></pre></div>
+      </div>
+      <div class="lsn-cams-cap" id="camCap"></div>
+      <button class="btn ghost" id="camNext">Next move ▶</button>`;
+    const words = cm.lines.map(l => l.word);
+    const decoys = [...new Set(words)];
+    const stage = host.querySelector('#camWorld');
+    const codePre = host.querySelector('#camCode');
+    const capEl = host.querySelector('#camCap');
+    const btn = host.querySelector('#camNext');
+    /* a tiny concrete scene per action word — built from the lesson's own idea steps */
+    const ideaByWord = {};
+    (session_idea_steps || []).forEach(st => { if (!ideaByWord[st.word]) ideaByWord[st.word] = st.state; });
+    let k = 0;
+    const show = () => {
+      if (k >= cm.lines.length) { btn.style.display = 'none'; return; }
+      const l = cm.lines[k];
+      CF.Visualizer.glideScene(stage, ideaByWord[l.word] || { arr: [], ptrs: {}, marks: {} });
+      codePre.innerHTML = cm.lines.map((x, i) =>
+        `<span class="${i === k ? 'cam-on' : (i < k ? 'cam-done' : 'cam-off')}">${esc(x.code)}</span>`).join('\n');
+      capEl.innerHTML = `<b>${esc(l.word)}</b> → <code>${esc(l.code)}</code> · ${esc(l.note)}`;
+      CF.Narrator.speak('Camera one, the world. Camera two, the code. ' + l.word + ': ' + l.code + '. ' + l.note);
+      CF.Sonify.fx('write', {});
+      k++;
+      if (k >= cm.lines.length) btn.textContent = 'That is the whole map ✓';
+    };
+    btn.addEventListener('click', show);
+    show();
+  }
+  let session_idea_steps = []; /* refreshed by renderIdea; used by the cameras */
+
+  /* ── Prediction market: wager XP before the reveal ── */
+  function mountMarket(host, predict, onSettled) {
+    if (!host || !predict) { if (onSettled) onSettled(null); return; }
+    host.className = 'lsn-market';
+    host.innerHTML = `
+      <div class="lsn-market-head">🎰 <b>Prediction market.</b> You are the trader — the animation is the market. Stake <b>10 ⭐XP</b> on the move you believe happens next. Win and the stake comes back with <b>+15 bonus</b>; lose and the miss enters your review queue. No stake? The machine reveals anyway.</div>
+      <div class="lsn-market-q">${esc(predict.q)}</div>
+      <div class="lsn-market-opts"></div>
+      <div class="lsn-market-fb"></div>`;
+    const optsBox = host.querySelector('.lsn-market-opts');
+    const fb = host.querySelector('.lsn-market-fb');
+    let settled = false;
+    predict.options.forEach((opt, i) => {
+      const b = document.createElement('button');
+      b.className = 'vz-opt';
+      b.innerHTML = `${esc(opt)} <span class="lsn-market-odds">10⭐</span>`;
+      b.addEventListener('click', () => {
+        if (settled) return;
+        settled = true;
+        const right = i === predict.correct;
+        b.classList.add(right ? 'right' : 'wrong');
+        optsBox.querySelectorAll('.vz-opt').forEach((o, j) => {
+          o.disabled = true;
+          if (j === predict.correct) o.classList.add('right');
+        });
+        CF.Sonify.fx(right ? 'win' : 'buzz', {});
+        fb.className = 'lsn-market-fb ' + (right ? 'ok' : 'bad');
+        fb.innerHTML = `${right ? '✅ Settled in your favor: +25 XP total.' : '❌ Settled against you — stake lost, reason below.'}<br>${esc(predict.why)}`;
+        CF.Narrator.speak((right ? 'Market settles in your favor. ' : 'Market settles against you. ') + predict.why);
+        if (onSettled) onSettled({ right, predict });
+      });
+    });
+    const skip = document.createElement('button');
+    skip.className = 'btn ghost lsn-market-skip';
+    skip.textContent = 'Sit this round out';
+    skip.addEventListener('click', () => {
+      if (settled) return;
+      settled = true;
+      optsBox.querySelectorAll('.vz-opt').forEach((o, j) => {
+        o.disabled = true;
+        if (j === predict.correct) o.classList.add('right');
+      });
+      if (onSettled) onSettled({ right: null, predict });
+    });
+    host.appendChild(skip);
+  }
+
   function renderWatch(container, session) {
     const ls = session.lesson;
     try { container._player && container._player.destroy(); } catch (e) {}
@@ -2203,19 +2494,43 @@ CF.Lessons = (() => {
         ${phaseBar(session, 'Watch')}
         <div class="lsn-hintline">👀 <b>Watch.</b> Narration is spoken; the screen shows only short labels. Pause or step back at any time — you control the pace. Pauses marked 🤔 ask you to <b>predict first</b>.</div>
         <div class="lsn-player-mount" id="lsnMount"></div>
+        <div class="lsn-market-mount" id="lsnMarket"></div>
         <div class="lsn-nav"><span class="lsn-next-note" id="lsnNote">Watch the full walkthrough, then continue.</span></div>
       </div>`;
     wireQuit(container, session);
     const mount = container.querySelector('#lsnMount');
+    const marketHost = container.querySelector('#lsnMarket');
     mountLessonFlow(mount, ls.id);
     const trace = ls.watch();
+    /* collect the checkpoints up front so each 🤔 stop becomes a market round */
+    const checks = (trace.steps || []).filter(s => s.predict).map(s => s.predict);
+    let round = -1;
+    const stats = { predicts: { right: 0, total: 0 } };
     const player = CF.Visualizer.createPlayer({
       container: mount, trace, mode: 'watch',
-      onDone: (stats) => {
-        session.watchStats = stats;
+      onProgress: (i) => {
+        const s = trace.steps[i];
+        if (s && s.predict) {
+          round++;
+          marketHost.innerHTML = '';
+          mountMarket(marketHost, s.predict, (res) => {
+            if (res && res.right !== null) {
+              stats.predicts.total++;
+              if (res.right) stats.predicts.right++;
+            }
+          });
+        }
+      },
+      onDone: (pstats) => {
+        session.watchStats = {
+          predicts: {
+            right: Math.max(stats.predicts.right, (pstats && pstats.predicts && pstats.predicts.right) || 0),
+            total: Math.max(stats.predicts.total, (pstats && pstats.predicts && pstats.predicts.total) || 0)
+          }
+        };
         const note = container.querySelector('#lsnNote');
         if (note) {
-          note.innerHTML = `Predictions: ${stats.predicts.right}/${stats.predicts.total} correct
+          note.innerHTML = `Predictions: ${session.watchStats.predicts.right}/${session.watchStats.predicts.total} correct
             <button class="btn primary" id="lsnNext">Next: Drive it yourself ▶</button>`;
           container.querySelector('#lsnNext').addEventListener('click', () => renderDrive(container, session));
         }

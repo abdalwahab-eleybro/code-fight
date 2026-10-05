@@ -702,6 +702,33 @@ CF.Visualizer = (() => {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  /* ── GLIDE — reuse the existing scene when the shape is unchanged so
+     cells tween their heights and pointers slide instead of hard-cutting.
+     Falls back to a full rebuild on structural changes. Shared by the
+     player AND the mini stages (idea phase, problem phase). ── */
+  function glideScene(stage, state) {
+    if (!state) return;
+    const arr = state.arr || [];
+    const prev = stage._vzState;
+    const sameShape = prev && prev.mainRow && stage.contains(prev.mainRow) &&
+      prev.arr.length === arr.length &&
+      JSON.stringify(prev.row2Arr || []) === JSON.stringify((state.row2 && state.row2.arr) || prev.row2Arr || []);
+    if (sameShape) {
+      animateScene(stage, state);
+    } else {
+      stage.classList.remove('vz-cut');
+      void stage.offsetWidth; /* restart the keyframe */
+      renderScene(stage, state);
+      stage._vzState = {
+        arr: arr.slice(),
+        row2Arr: state.row2 ? (state.row2.arr || []).slice() : null,
+        mainRow: stage.querySelector('.vz-row'),
+        ptrLayer: stage.querySelector('.vz-ptrs')
+      };
+      stage.classList.add('vz-cut');
+    }
+  }
+
   /* ── SCENE RENDER (shared by watch / drive modes) ── */
   function renderScene(stage, state) {
     if (!state) return;
@@ -966,25 +993,7 @@ CF.Visualizer = (() => {
       /* 3b1b-style motion: the scene GLIDES when only values/marks/pointers
          changed; a structural jump (step-back, loop edge, re-init) hard-cuts
          with a quick fade instead of freezing mid-animation. */
-      const prev = stage._vzState;
-      const arr = s.state?.arr || [];
-      const sameShape = prev && prev.mainRow && stage.contains(prev.mainRow) &&
-        prev.arr.length === arr.length &&
-        JSON.stringify(prev.row2Arr || []) === JSON.stringify((s.state?.row2?.arr) || prev.row2Arr || []);
-      if (sameShape) {
-        animateScene(stage, s.state);
-      } else {
-        stage.classList.remove('vz-cut');
-        void stage.offsetWidth; /* restart the keyframe */
-        renderScene(stage, s.state);
-        stage._vzState = {
-          arr: arr.slice(),
-          row2Arr: s.state?.row2 ? (s.state.row2.arr || []).slice() : null,
-          mainRow: stage.querySelector('.vz-row'),
-          ptrLayer: stage.querySelector('.vz-ptrs')
-        };
-        stage.classList.add('vz-cut');
-      }
+      glideScene(stage, s.state || { arr: [] });
       container.querySelector('.vz-progress').textContent = `${idx + 1} / ${steps.length}`;
       codeEl.querySelectorAll('.vz-code-line').forEach(l =>
         l.classList.toggle('active', Number(l.dataset.line) === (s.line ?? -1)));
@@ -1211,5 +1220,5 @@ CF.Visualizer = (() => {
     return { destroy, goTo, stepForward, play: () => { if (!playing) togglePlay(); } };
   }
 
-  return { createPlayer, renderScene, animateScene };
+  return { createPlayer, renderScene, animateScene, glideScene };
 })();
