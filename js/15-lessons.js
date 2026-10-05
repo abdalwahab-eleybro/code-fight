@@ -2966,12 +2966,14 @@ CF.Lessons = (() => {
       container: mount, trace, mode: 'drive',
       onDone: (stats) => {
         session.driveStats = stats;
-        const note = container.querySelector('#lsnNote');
-        if (note) {
+        const finish = () => {
+          const note = container.querySelector('#lsnNote');
+          if (!note) return;
           note.innerHTML = `Mistakes: ${stats.driveMistakes} — every miss taught you something.
             <button class="btn primary" id="lsnNext">Next: Break it ▶</button>`;
           container.querySelector('#lsnNext').addEventListener('click', () => renderBreak(container, session));
-        }
+        };
+        showSpiralCard(container, session, '#lsnMount', '.lsn-market-mount', 'Next: break it', finish);
       }
     });
     container._player = player;
@@ -2992,35 +2994,47 @@ CF.Lessons = (() => {
     wireQuit(container, session);
     const mount = container.querySelector('#lsnMount');
 
-    if (hasBug) {
-      const trace = ls.bug();
-      if (!trace) { renderExplain(container, session); return; }
-      const player = CF.Visualizer.createPlayer({
-        container: mount, trace, mode: 'watch',
-        onDone: () => {
-          const note = container.querySelector('#lsnNote');
-          if (note) {
-            note.innerHTML = `<button class="btn primary" id="lsnNext">Next: Explain it back ▶</button>`;
-            container.querySelector('#lsnNext').addEventListener('click', () => renderExplain(container, session));
-          }
-        }
+    /* Wrong-path tour first: watch the tempting-but-wrong approach fail,
+       then the pattern's own assumption-crash. Both use the same engine. */
+    if (ls.wrongPath) {
+      const wpPlayer = mountWrongPath(mount, ls, () => {
+        setTimeout(() => startBreakTrace(), 600);
       });
-      container._player = player;
-      setTimeout(() => player.play(), 350);
-    } else {
-      /* card-style misconception (p6: the crash, not a trace) */
-      const mc = ls.misconceptionCard;
-      if (!mc) { renderExplain(container, session); return; }
-      mount.innerHTML = `
-        <div class="lsn-card plain misconception">
-          <div class="lsn-mc-title">⚠️ ${esc(mc.title)}</div>
-          <pre class="lsn-mc-code">${esc(mc.text.split('\n\n')[1] || '')}</pre>
-          <p class="lsn-hook">${esc(mc.text.split('\n\n').slice(-1)[0])}</p>
-        </div>`;
-      CF.Narrator.speak(mc.narration);
-      const note = container.querySelector('#lsnNote');
-      note.innerHTML = `<button class="btn primary" id="lsnNext">Next: Explain it back ▶</button>`;
-      container.querySelector('#lsnNext').addEventListener('click', () => renderExplain(container, session));
+      if (wpPlayer) { container._player = wpPlayer; return; }
+    }
+    startBreakTrace();
+
+    function startBreakTrace() {
+      if (hasBug) {
+        const trace = ls.bug();
+        if (!trace) { renderExplain(container, session); return; }
+        const player = CF.Visualizer.createPlayer({
+          container: mount, trace, mode: 'watch',
+          onDone: () => {
+            const note = container.querySelector('#lsnNote');
+            if (note) {
+              note.innerHTML = `<button class="btn primary" id="lsnNext">Next: Explain it back ▶</button>`;
+              container.querySelector('#lsnNext').addEventListener('click', () => renderExplain(container, session));
+            }
+          }
+        });
+        container._player = player;
+        setTimeout(() => player.play(), 350);
+      } else {
+        /* card-style misconception (p6: the crash, not a trace) */
+        const mc = ls.misconceptionCard;
+        if (!mc) { renderExplain(container, session); return; }
+        mount.innerHTML = `
+          <div class="lsn-card plain misconception">
+            <div class="lsn-mc-title">⚠️ ${esc(mc.title)}</div>
+            <pre class="lsn-mc-code">${esc(mc.text.split('\n\n')[1] || '')}</pre>
+            <p class="lsn-hook">${esc(mc.text.split('\n\n').slice(-1)[0])}</p>
+          </div>`;
+        CF.Narrator.speak(mc.narration);
+        const note = container.querySelector('#lsnNote');
+        note.innerHTML = `<button class="btn primary" id="lsnNext">Next: Explain it back ▶</button>`;
+        container.querySelector('#lsnNext').addEventListener('click', () => renderExplain(container, session));
+      }
     }
   }
 

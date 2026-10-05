@@ -458,3 +458,68 @@
 }
 .lsn-spiral-q { font-size: 13.5px; line-height: 1.65; color: #e2e8f0; white-space: pre-wrap; margin-bottom: 10px; }
 .lsn-spiral-input { width: 100%; margin-bottom: 10px; resize: vertical; }
+
+/* ═══ Imagine openers (3b1b style) ═══ */
+.lsn-imagine {
+  margin: 14px 0; padding: 16px 18px; border-radius: 14px;
+  background: linear-gradient(135deg, rgba(56,189,248,.08), rgba(167,139,250,.08));
+  border: 1px solid rgba(148,163,184,.18);
+}
+.lsn-imagine-word {
+  font-size: 12px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+  color: #a78bfa; margin-bottom: 8px; opacity: 0; transition: opacity .6s ease;
+}
+.lsn-imagine-text {
+  font-size: 15px; line-height: 1.75; color: #cbd5e1; font-style: italic;
+  opacity: .35; filter: blur(1px); transition: opacity .9s ease, filter .9s ease;
+}
+.lsn-imagine.lit .lsn-imagine-word { opacity: 1; }
+.lsn-imagine.lit .lsn-imagine-text { opacity: 1; filter: none; color: #e2e8f0; }
+
+/* ═══ Loop-invariant proof ladder ═══ */
+.lsn-proof {
+  margin: 14px 0; padding: 14px 16px; border-radius: 14px;
+  background: var(--panel-2, #0f172a); border: 1px dashed rgba(56,189,248,.35);
+}
+.lsn-proof-head { font-size: 13px; color: #94a3b8; margin-bottom: 8px; line-height: 1.6; }
+.lsn-proof-claim {
+  font-size: 14px; font-weight: 700; color: #38bdf8; margin-bottom: 10px; line-height: 1.6;
+}
+.lsn-proof-steps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.lsn-proof-card {
+  display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px;
+  background: rgba(148,163,184,.06); border-left: 3px solid #38bdf8;
+  font-size: 13px; line-height: 1.65; color: #e2e8f0;
+}
+.lsn-proof-card.reveal { animation: lsn-spiral-in .45s cubic-bezier(.4,0,.2,1); }
+.lsn-proof-card.basis { border-left-color: #22c55e; }
+.lsn-proof-card.step  { border-left-color: #fbbf24; }
+.lsn-proof-card.end   { border-left-color: #a78bfa; }
+.lsn-proof-tag {
+  font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #94a3b8;
+}
+
+/* ═══ Wrong-path punchline ═══ */
+.lsn-wp-punch {
+  margin-top: 12px; padding: 12px 14px; border-radius: 12px;
+  background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.4);
+  color: #fca5a5; font-size: 14px; font-weight: 700; line-height: 1.6;
+  animation: lsn-spiral-in .5s cubic-bezier(.4,0,.2,1);
+}
+
+/* ═══ Two cameras (world ↔ code) ═══ */
+.lsn-cams { margin: 14px 0; padding: 14px; border-radius: 14px; background: var(--panel-2, #0f172a); border: 1px solid var(--border, #1e293b); }
+.lsn-cams-head { font-size: 12.5px; color: #94a3b8; line-height: 1.6; margin-bottom: 10px; }
+.lsn-cams-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 720px) { .lsn-cams-grid { grid-template-columns: 1fr; } }
+.lsn-cam {
+  border-radius: 12px; padding: 10px 12px; min-height: 120px;
+  background: rgba(148,163,184,.05); border: 1px solid rgba(148,163,184,.15);
+  transition: box-shadow .4s ease;
+}
+.lsn-cam-label { font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #94a3b8; margin-bottom: 8px; }
+.lsn-cam-pre { margin: 0; font-family: ui-monospace, monospace; font-size: 12.5px; line-height: 1.9; white-space: pre-wrap; }
+.lsn-cam-pre .cam-on   { display: block; color: #fbbf24; background: rgba(251,191,36,.1); border-radius: 6px; padding: 0 6px; }
+.lsn-cam-pre .cam-done { display: block; color: #64748b; }
+.lsn-cam-pre .cam-off  { display: block; color: #334155; }
+.lsn-cams-cap { font-size: 13px; color: #e2e8f0; line-height: 1.65; margin: 10px 0; }
