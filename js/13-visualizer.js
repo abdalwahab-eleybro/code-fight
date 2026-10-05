@@ -17,8 +17,9 @@ CF.Narrator = (() => {
   let voice = null;
   let voicePicked = false;
   let curUtter = null;     // live utterance, so the player can wait for it
-  let speakAt = 0;          // when the current utterance was queued
-  let started = false;      // did the engine actually BEGIN playing it?
+  let speakAt = 0;         // when the current utterance was queued
+  let startedAt = 0;       // when the engine ACTUALLY began speaking it
+  let endedAt = 0;         // when the engine reported onend/onerror
 
   function supported() {
     return typeof window !== 'undefined' && 'speechSynthesis' in window;
@@ -26,14 +27,18 @@ CF.Narrator = (() => {
 
   function pickVoice() {
     if (!supported() || voicePicked) return voice;
-    voicePicked = true;
     try {
       const vs = window.speechSynthesis.getVoices();
+      if (!vs || !vs.length) return null;   // not loaded yet — retry later
+      voicePicked = true;
       voice = vs.find(v => /^en(-|_)/i.test(v.lang) && /google|natural|samantha|daniel/i.test(v.name))
            || vs.find(v => /^en(-|_)/i.test(v.lang))
            || vs[0] || null;
     } catch (e) { voice = null; }
     return voice;
+  }
+  if (supported()) {
+    try { window.speechSynthesis.onvoiceschanged = () => { voicePicked = false; pickVoice(); }; } catch (e) {}
   }
 
   function speak(text) {
@@ -46,30 +51,32 @@ CF.Narrator = (() => {
       u.volume = 1;
       const v = pickVoice();
       if (v) { try { u.voice = v; } catch (e) {} }
-      started = false;
+      startedAt = 0; endedAt = 0;
       speakAt = Date.now();
-      u.onstart = () => { started = true; };
-      u.onend = () => { curUtter = null; };
-      u.onerror = () => { curUtter = null; };
+      u.onstart = () => { startedAt = Date.now(); };
+      u.onend = () => { endedAt = Date.now(); if (curUtter === u) curUtter = null; };
+      u.onerror = () => { endedAt = Date.now(); if (curUtter === u) curUtter = null; };
       curUtter = u;
       window.speechSynthesis.speak(u);
     } catch (e) { curUtter = null; /* non-fatal */ }
   }
 
-  /* true while the current utterance is still talking.
-     Wedge-proof: in sandboxed preview frames speechSynthesis can accept an
-     utterance but never start it (onstart/onend never fire, `speaking`
-     hangs true). Without the guards below, every player transition would
-     wait on a voice that will never play and the run looks frozen. */
+  /* true ONLY while the voice has verifiably started and not yet finished.
+     LAG FIX: the old version trusted `speechSynthesis.speaking`, which stays
+     true through Chrome's startup delay and wedges forever in some engines —
+     the player then sat idle seconds after every sentence. Now:
+       · never started within 700 ms  → treat as silent, don't hold playback
+       · onend/onerror fired          → immediately done
+       · running longer than a hard cap → wedged, give up waiting          */
   function isSpeaking() {
     if (!enabled || !supported() || !curUtter) return false;
+    if (endedAt) return false;
     try {
-      const age = Date.now() - speakAt;
-      /* queued but the engine never began playing it → stop waiting */
-      if (!started && age > 1000) return false;
-      /* engine claims to be talking far beyond any plausible duration → wedged */
-      if (age > estimateMs(curUtter.text, rate) + 4000) return false;
-      return !!(window.speechSynthesis.speaking || window.speechSynthesis.pending);
+      if (!startedAt) return (Date.now() - speakAt) < 700;
+      if (!(window.speechSynthesis.speaking || window.speechSynthesis.pending)) return false;
+      const cap = Math.min(estimateMs(curUtter.text, rate) + 2500, 12000);
+      if (Date.now() - startedAt > cap) return false;
+      return true;
     } catch (e) { return false; }
   }
 
@@ -575,7 +582,11 @@ CF.Visualizer = (() => {
       return;
     }
 
-    /* values + marks: mutate in place so CSS transitions carry the change */
+    /* values + marks: mutate in place so CSS transitions carry the change.
+       THE 3B1B FIX: cell fill is a child element (.vz-fill) whose height is
+       a real px value — animating `height` actually tweens. (The old version
+       animated the custom property --h, which CSS cannot interpolate without
+       @property support, so every "animation" was an instant snap.) */
     const cells = prev.mainRow.querySelectorAll('.vz-cell');
     arr.forEach((v, i) => {
       const cell = cells[i];
@@ -583,12 +594,16 @@ CF.Visualizer = (() => {
       const valEl = cell.querySelector('.vz-val');
       if (valEl && String(valEl.textContent) !== String(v)) valEl.textContent = v;
       const mk = state.marks?.[i] || state.marks?.[String(i)] || '';
-      const want = 'vz-cell ' + mk;
+      const want = 'vz-cell' + (mk ? ' ' + mk : '');
       if (cell.className !== want) cell.className = want;
       let frac = 0.6;
       if (typeof v === 'number') frac = hi > lo ? (v - lo) / (hi - lo) : 0.6;
-      const h = ((typeof v === 'number' ? 32 : 48) + Math.round(frac * 58)) + '%';
-      if (cell.style.getPropertyValue('--h') !== h) cell.style.setProperty('--h', h);
+      const hpx = Math.round(28 + frac * 54);
+      const fill = cell.querySelector('.vz-fill');
+      if (fill && fill.style.height !== hpx + 'px') fill.style.height = hpx + 'px';
+      if (cell.style.getPropertyValue('--h') !== (Math.round(frac * 100)) + '%') {
+        cell.style.setProperty('--h', (Math.round(frac * 100)) + '%');
+      }
     });
 
     /* pointers: reuse the layer — positionPointers slides existing tags */
@@ -704,15 +719,16 @@ CF.Visualizer = (() => {
     arr.forEach((v, i) => {
       const cell = document.createElement('div');
       const mk = state.marks?.[i] || state.marks?.[String(i)] || '';
-      cell.className = 'vz-cell ' + (mk || '');
+      cell.className = 'vz-cell' + (mk ? ' ' + mk : '');
       cell.dataset.i = i;
-      if (typeof v === 'number') {
-        const frac = hi > lo ? (v - lo) / (hi - lo) : 0.6;
-        cell.style.setProperty('--h', (32 + Math.round(frac * 58)) + '%');
-      } else {
-        cell.style.setProperty('--h', '48%');
-      }
-      cell.innerHTML = `<span class="vz-val">${esc(v)}</span>`;
+      let frac = 0.6;
+      if (typeof v === 'number') frac = hi > lo ? (v - lo) / (hi - lo) : 0.6;
+      else frac = 0.5;
+      cell.style.setProperty('--h', Math.round(frac * 100) + '%');
+      /* .vz-fill: a real px height that CSS can tween — the animated bar
+         behind the value (3b1b-style growth/morph of the bars) */
+      cell.innerHTML = `<span class="vz-fill" style="height:${Math.round(28 + frac * 54)}px"></span>` +
+                       `<span class="vz-val">${esc(v)}</span>`;
       main.appendChild(cell);
     });
 
@@ -911,19 +927,18 @@ CF.Visualizer = (() => {
     /* ── stepping ── */
     function stepMs() { return BASE_STEP_MS / (prefs.speed || 1); }
 
-    /* Pacing: a step must not advance while the narrator is still
-       talking. Base delay = max(1.5 s, estimated spoken duration). */
+    /* Pacing — LAG FIX: the voice itself is the clock. autoAdvance polls
+       isSpeaking() every 250 ms and moves the moment a sentence ends, so
+       this number is only the floor. The old formula used the raw estimate
+       as the WAIT (8–11 s dead air per long sentence). Now it is capped at
+       3.5 s; when narration is off it becomes reading time instead. */
     function stepWaitMs() {
-      const s = steps[idx];
       const base = stepMs();
-      if (!s) return base;
-      const text = s.narration || s.caption || '';
-      if (prefs.narration && text) {
-        const est = CF.Narrator.estimateMs(text, prefs.speed || 1) + 350;
-        /* drive mode is interaction-first: the learner is here to make
-           moves — never let a long narration estimate stall the pace */
-        if (mode === 'drive') return Math.min(Math.max(base, est), 6000);
-        return Math.max(base, est);
+      if (!prefs.narration) {
+        const s = steps[idx];
+        const text = s ? (s.narration || s.caption || '') : '';
+        if (text) return Math.max(base, Math.min(CF.Narrator.estimateMs(text, prefs.speed || 1), 4000));
+        return base;
       }
       return base;
     }
@@ -931,20 +946,17 @@ CF.Visualizer = (() => {
     /* Hold a prompt overlay until the sentence that introduced it has
        actually been spoken (or plausibly finished). Without this the 🤔
        question popped up over the narrator's first words — learners read
-       faster than the voice talks and thought the narration was skipped. */
-    function afterNarration(fn, capMs) {
-      const text = (steps[idx] && (steps[idx].narration || steps[idx].caption)) || '';
-      const est = (prefs.narration && text)
-        ? CF.Narrator.estimateMs(text, prefs.speed || 1) + 250 : 0;
-      const wait = capMs ? Math.min(est, capMs) : est;
+       faster than the voice talks and thought the narration was skipped.
+       Capped at 6 s so a wedged voice engine can never hide a prompt. */
+    function afterNarration(fn) {
       let held = 0;
       const tick = () => {
         if (destroyed) return;
-        if (CF.Narrator.isSpeaking() && held < 48) { held++; timer = setTimeout(tick, 250); return; }
+        if (CF.Narrator.isSpeaking() && held < 24) { held++; timer = setTimeout(tick, 250); return; }
         fn();
       };
       clearTimer();
-      timer = setTimeout(tick, wait);
+      tick();
     }
 
     function renderStep() {
@@ -1025,7 +1037,7 @@ CF.Visualizer = (() => {
          explained it. Now every prompt waits for that sentence to be
          spoken (or plausibly finished), so context always comes first. */
       if (s.predict && mode === 'watch') { pause(); afterNarration(() => showPredict(s)); return; }
-      if (s.drive && mode === 'drive') { pause(); afterNarration(() => showDrive(s), 2500); return; }
+      if (s.drive && mode === 'drive') { pause(); afterNarration(() => showDrive(s)); return; }
       if (playing) { autoAdvance(); } /* keep the playback chain alive in BOTH modes */
     }
 
@@ -1035,8 +1047,8 @@ CF.Visualizer = (() => {
       const tick = () => {
         if (destroyed || !playing) return;
         /* narrator still mid-sentence → hold the step, recheck every
-           250 ms (cap ≈ +12 s so a stuck voice engine can't freeze it) */
-        if (CF.Narrator.isSpeaking() && held < 48) {
+           250 ms (cap ≈ +6 s so a stuck voice engine can't freeze it) */
+        if (CF.Narrator.isSpeaking() && held < 24) {
           held++;
           timer = setTimeout(tick, 250);
           return;
@@ -1166,26 +1178,21 @@ CF.Visualizer = (() => {
       });
     }
 
-    /* finish detection: fire onDone once the last step has been shown */
+    /* finish detection: fire onDone once the last step has been shown.
+       LAG FIX: poll the voice from t≈0 instead of sleeping for a full
+       duration estimate first — completion lands the moment narration ends. */
     const origRender = renderStep;
     renderStep = function () {
       origRender();
       if (idx >= steps.length - 1 && !steps[idx].drive && !steps[idx].predict) {
-        /* let the last visual breathe AND let the narrator finish his
-           closing line, then signal completion */
         clearTimer();
-        const s = steps[idx];
-        const text = s.narration || s.caption || '';
-        const wait = (prefs.narration && text)
-          ? Math.max(stepMs() * 0.8, CF.Narrator.estimateMs(text, prefs.speed || 1) + 400)
-          : stepMs() * 0.8;
-        const held = 0;
+        let held = 0;
         const tick = () => {
-          if (destroyed) return;
-          if (CF.Narrator.isSpeaking() && held < 48) { held++; timer = setTimeout(tick, 250); return; }
+          if (destroyed || doneFired) return;
+          if (CF.Narrator.isSpeaking() && held < 24) { held++; timer = setTimeout(tick, 250); return; }
           fireDone();
         };
-        timer = setTimeout(tick, mode === 'drive' ? Math.min(wait, 5000) : wait);
+        timer = setTimeout(tick, Math.min(stepMs() * 0.8, 1200));
       }
     };
 
