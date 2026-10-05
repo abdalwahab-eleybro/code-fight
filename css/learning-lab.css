@@ -550,7 +550,7 @@
 
 /* ═══ Manim-style choreography polish (sceneFx layer) ═══ */
 /* register --h so heat-colour tweens smoothly alongside the px bar height */
-@property --h { syntax: '<number>'; inherits: false; initial-value: 50; }
+@property --h { syntax: '<percentage>'; inherits: false; initial-value: 60%; }
 /* arcs and packets must be positioned relative to the stage, not the page */
 .vz-stage { position: relative; }
 /* ring pulses sit above dimmed neighbours so focus reads clearly */
