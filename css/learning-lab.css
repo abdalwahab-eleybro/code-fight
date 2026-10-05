@@ -399,3 +399,24 @@
     fill: var(--flow-col, #22d3ee);
     filter: drop-shadow(0 0 6px var(--flow-col, #22d3ee));
   }
+
+  /* ── Watch-phase checkpoint card (prediction market) ──
+     Inline card BELOW the player — never an overlay on top of the stage,
+     so a question can't visually interrupt the narrator mid-sentence. */
+  .lsn-market-mount { margin: 10px 0 4px; }
+  .lsn-market {
+    border: 1px solid rgba(251, 191, 36, .35);
+    background: linear-gradient(180deg, rgba(251, 191, 36, .07), rgba(251, 191, 36, .02));
+    border-radius: 14px; padding: 14px 16px; animation: lsn-market-in .35s ease both;
+  }
+  @keyframes lsn-market-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .lsn-market-head { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin-bottom: 8px; }
+  .lsn-market-head b { color: var(--gold); }
+  .lsn-market-q { font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 10px; line-height: 1.5; }
+  .lsn-market-opts { display: flex; flex-direction: column; gap: 8px; }
+  .lsn-market-odds { font-size: 11px; color: var(--gold); opacity: .85; margin-left: 6px; }
+  .lsn-market-fb { margin-top: 10px; font-size: 13px; line-height: 1.6; color: #e2e8f0; }
+  .lsn-market-fb.ok  { color: #86efac; }
+  .lsn-market-fb.bad { color: #fca5a5; }
+  .lsn-market-skip { margin-top: 10px; font-size: 12px; }
+  .lsn-market-done { opacity: .55; transition: opacity .4s; }

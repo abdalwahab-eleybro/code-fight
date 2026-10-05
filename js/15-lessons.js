@@ -23,6 +23,27 @@ CF.Lessons = (() => {
   const R = CF.Renderers;
   const AI = CF.AITutor;
 
+  /* ── XP ledger (prediction market) ──
+     Wagering needs real stakes: we debit the stake at match time and credit
+     winnings when the round settles. If the learner has no coins, the round
+     is played "free" (win pays nothing, loss costs nothing). */
+  function xpBalance() {
+    try { return (S.profile && typeof S.profile.xp === 'number') ? S.profile.xp : 0; }
+    catch (e) { return 0; }
+  }
+  function xpAdd(n) {
+    try {
+      if (n < 0) {
+        /* addXP never clamps — keep the purse non-negative manually */
+        const cur = xpBalance();
+        S.addXP(Math.max(-cur, n));
+      } else {
+        S.addXP(n);
+      }
+      if (typeof R.renderHUD === 'function') R.renderHUD();
+    } catch (e) {}
+  }
+
   /* ═══════════════════════════════════════════════════════ */
   /*  TRACE GENERATORS (pure — testable without a DOM)       */
   /* ═══════════════════════════════════════════════════════ */
@@ -2022,8 +2043,31 @@ CF.Lessons = (() => {
       </div>`;
     wireQuit(container, session);
     const mount = container.querySelector('#lsnMount');
+    /* checkpoint card host — the Brute phase keeps its 🤔 comprehension
+       checks as a clean inline card (never an overlay on top of narration) */
+    const chkHost = document.createElement('div');
+    chkHost.className = 'lsn-market-mount';
+    mount.parentNode.insertBefore(chkHost, mount.nextSibling);
+    const brTrace = br.trace();
     const player = CF.Visualizer.createPlayer({
-      container: mount, trace: br.trace(), mode: 'watch',
+      container: mount, trace: brTrace, mode: 'watch',
+      suppressOverlay: true, /* one checkpoint UI at a time — the market card */
+      onProgress: (i) => {
+        const s = brTrace.steps[i];
+        if (!(s && s.predict)) { chkHost.innerHTML = ''; return; }
+        setTimeout(() => {
+          if (!container.contains(chkHost)) return;
+          const cur = brTrace.steps[i];
+          if (!(cur && cur.predict)) return;
+          chkHost.innerHTML = '';
+          mountMarket(chkHost, cur.predict, (res) => {
+            if (res && res.right !== null) {
+              chkHost.classList.add('lsn-market-done');
+              setTimeout(() => { try { player.play(); } catch (e) {} }, 900);
+            }
+          });
+        }, Math.min(CF.Narrator.estimateMs(s.narration || s.caption || '', 1), 20000));
+      },
       onDone: () => {
         const note = container.querySelector('#lsnNote');
         if (note) {
@@ -2439,37 +2483,53 @@ CF.Lessons = (() => {
   }
   let session_idea_steps = []; /* refreshed by renderIdea; used by the cameras */
 
-  /* ── Prediction market: wager XP before the reveal ── */
+  /* ── Prediction market: wager XP before the reveal ──
+     MESS FIX #1: this is now the ONLY checkpoint UI in Watch — the player's
+       built-in 🤔 popup is suppressed for lesson players, so a question no
+       longer appears twice (once as overlay, once as market).
+     MESS FIX #2: it never calls CF.Narrator.speak() anymore. The old version
+       cancelled the narrator mid-sentence to read its own verdict — that was
+       the "interruption" learners heard. Verdicts are text-only; the voice
+       belongs to the step narration alone. */
   function mountMarket(host, predict, onSettled) {
     if (!host || !predict) { if (onSettled) onSettled(null); return; }
     host.className = 'lsn-market';
+    const STAKE = 10, BONUS = 15;
+    const canStake = xpBalance() >= STAKE;
     host.innerHTML = `
-      <div class="lsn-market-head">🎰 <b>Prediction market.</b> You are the trader — the animation is the market. Stake <b>10 ⭐XP</b> on the move you believe happens next. Win and the stake comes back with <b>+15 bonus</b>; lose and the miss enters your review queue. No stake? The machine reveals anyway.</div>
-      <div class="lsn-market-q">${esc(predict.q)}</div>
+      <div class="lsn-market-head">🎰 <b>Prediction market.</b> ${canStake
+        ? `Stake <b>${STAKE} ⭐XP</b> on the move you believe happens next — win and it returns with a <b>+${BONUS}</b> bonus; lose and the miss enters your review queue.`
+        : `Not enough XP to stake — play this round free: answer honestly and the machine reveals after you commit.`}</div>
+      <div class="lsn-market-q">🤔 ${esc(predict.q)}</div>
       <div class="lsn-market-opts"></div>
       <div class="lsn-market-fb"></div>`;
     const optsBox = host.querySelector('.lsn-market-opts');
     const fb = host.querySelector('.lsn-market-fb');
     let settled = false;
+    const settle = (i) => {
+      if (settled) return;
+      settled = true;
+      const right = i === predict.correct;
+      if (canStake) {
+        xpAdd(-STAKE);                       /* stake leaves the purse */
+        if (right) xpAdd(STAKE + BONUS);     /* winner takes stake back + bonus */
+      }
+      const buttons = optsBox.querySelectorAll('.vz-opt');
+      buttons.forEach((o, j) => { o.disabled = true; if (j === predict.correct) o.classList.add('right'); });
+      if (buttons[i]) buttons[i].classList.add(right ? 'right' : 'wrong');
+      CF.Sonify.fx(right ? 'win' : 'buzz', {});
+      fb.className = 'lsn-market-fb ' + (right ? 'ok' : 'bad');
+      fb.innerHTML = `${right
+          ? `✅ Settled in your favor.${canStake ? ` +${BONUS} XP.` : ''}`
+          : `❌ Settled against you.${canStake ? ` −${STAKE} XP — queued for review.` : ' Queued for review.'}`}<br>${esc(predict.why)}`;
+      if (onSettled) onSettled({ right, predict });
+    };
     predict.options.forEach((opt, i) => {
       const b = document.createElement('button');
       b.className = 'vz-opt';
-      b.innerHTML = `${esc(opt)} <span class="lsn-market-odds">10⭐</span>`;
-      b.addEventListener('click', () => {
-        if (settled) return;
-        settled = true;
-        const right = i === predict.correct;
-        b.classList.add(right ? 'right' : 'wrong');
-        optsBox.querySelectorAll('.vz-opt').forEach((o, j) => {
-          o.disabled = true;
-          if (j === predict.correct) o.classList.add('right');
-        });
-        CF.Sonify.fx(right ? 'win' : 'buzz', {});
-        fb.className = 'lsn-market-fb ' + (right ? 'ok' : 'bad');
-        fb.innerHTML = `${right ? '✅ Settled in your favor: +25 XP total.' : '❌ Settled against you — stake lost, reason below.'}<br>${esc(predict.why)}`;
-        CF.Narrator.speak((right ? 'Market settles in your favor. ' : 'Market settles against you. ') + predict.why);
-        if (onSettled) onSettled({ right, predict });
-      });
+      b.innerHTML = `${esc(opt)}${canStake ? ' <span class="lsn-market-odds">10⭐</span>' : ''}`;
+      b.addEventListener('click', () => settle(i));
+      optsBox.appendChild(b);
     });
     const skip = document.createElement('button');
     skip.className = 'btn ghost lsn-market-skip';
@@ -2477,10 +2537,9 @@ CF.Lessons = (() => {
     skip.addEventListener('click', () => {
       if (settled) return;
       settled = true;
-      optsBox.querySelectorAll('.vz-opt').forEach((o, j) => {
-        o.disabled = true;
-        if (j === predict.correct) o.classList.add('right');
-      });
+      optsBox.querySelectorAll('.vz-opt').forEach((o, j) => { o.disabled = true; if (j === predict.correct) o.classList.add('right'); });
+      fb.className = 'lsn-market-fb';
+      fb.innerHTML = `⏭ No stake placed. ${esc(predict.why)}`;
       if (onSettled) onSettled({ right: null, predict });
     });
     host.appendChild(skip);
@@ -2508,17 +2567,32 @@ CF.Lessons = (() => {
     const stats = { predicts: { right: 0, total: 0 } };
     const player = CF.Visualizer.createPlayer({
       container: mount, trace, mode: 'watch',
+      suppressOverlay: true, /* ONE checkpoint UI only — the market below.
+        The built-in 🤔 popup used to stack on top of it mid-narration. */
       onProgress: (i) => {
         const s = trace.steps[i];
         if (s && s.predict) {
+          /* mount the market only AFTER the intro sentence has been spoken —
+             same voice-locked pacing as before, but now there is exactly one
+             question card, and nothing ever speaks over the narrator. */
           round++;
-          marketHost.innerHTML = '';
-          mountMarket(marketHost, s.predict, (res) => {
-            if (res && res.right !== null) {
-              stats.predicts.total++;
-              if (res.right) stats.predicts.right++;
-            }
-          });
+          setTimeout(() => {
+            if (!container.contains(marketHost)) return; /* phase changed */
+            const cur = trace.steps[i];
+            if (!(cur && cur.predict)) return;           /* learner stepped away */
+            marketHost.innerHTML = '';
+            mountMarket(marketHost, cur.predict, (res) => {
+              if (res && res.right !== null) {
+                stats.predicts.total++;
+                if (res.right) stats.predicts.right++;
+              }
+              /* learner answered → resume the walkthrough automatically */
+              if (res && res.right !== null) {
+                marketHost.classList.add('lsn-market-done');
+                setTimeout(() => { try { player.play(); } catch (e) {} }, 900);
+              }
+            });
+          }, Math.min(CF.Narrator.estimateMs(s.narration || s.caption || '', 1), 20000));
         }
       },
       onDone: (pstats) => {

@@ -851,7 +851,10 @@ CF.Visualizer = (() => {
 
   /* ── PLAYER ── */
   function createPlayer(opts) {
-    const { container, trace, mode = 'watch', onDone, onProgress } = opts;
+    /* suppressOverlay: the lesson shell can render its own checkpoint UI
+       (prediction market) instead of the built-in 🤔 popup — one prompt
+       engine at a time, never both. */
+    const { container, trace, mode = 'watch', onDone, onProgress, suppressOverlay } = opts;
     const steps = trace.steps || [];
     let idx = 0;
     let playing = mode === 'drive';
@@ -975,12 +978,38 @@ CF.Visualizer = (() => {
        actually been spoken (or plausibly finished). Without this the 🤔
        question popped up over the narrator's first words — learners read
        faster than the voice talks and thought the narration was skipped.
-       Capped at 6 s so a wedged voice engine can never hide a prompt. */
+
+       MESS FIX: the old version polled isSpeaking() every 250 ms, but many
+       engines fire onstart late or not at all — after ~700 ms of grace the
+       poll concluded "not speaking" and the prompt cut in mid-sentence.
+       Now we also keep holding while the utterance is still queued/running
+       inside speechSynthesis, and as a last resort fall back to the spoken
+       duration estimate so a long intro is never interrupted. Hard cap 20 s
+       so a wedged engine can't hide a prompt forever. */
+    function voiceBusy() {
+      if (!CF.Narrator.isEnabled() || !CF.Narrator.supported()) return false;
+      try { return window.speechSynthesis.speaking || window.speechSynthesis.pending; }
+      catch (e) { return false; }
+    }
     function afterNarration(fn) {
-      let held = 0;
+      const s = steps[idx];
+      const text = s ? (s.narration || s.caption || '') : '';
+      let holdMs;
+      if (!prefs.narration) {
+        /* voice off → the caption is the narration: give reading time */
+        holdMs = text ? Math.min(CF.Narrator.estimateMs(text, 2), 4000) : 0;
+      } else {
+        /* voice on → spoken duration estimate as the floor; the engine's own
+           speaking/pending flags extend it when real speech runs longer */
+        holdMs = Math.min(CF.Narrator.estimateMs(text, prefs.speed || 1), 20000);
+      }
+      const t0 = Date.now();
+      let settled = false;
       const tick = () => {
-        if (destroyed) return;
-        if (CF.Narrator.isSpeaking() && held < 24) { held++; timer = setTimeout(tick, 250); return; }
+        if (destroyed || settled) return;
+        const el = Date.now() - t0;
+        if (el < holdMs || voiceBusy()) { timer = setTimeout(tick, 200); return; }
+        settled = true;
         fn();
       };
       clearTimer();
@@ -1046,26 +1075,37 @@ CF.Visualizer = (() => {
          introducing the step — the question appeared BEFORE the voice
          explained it. Now every prompt waits for that sentence to be
          spoken (or plausibly finished), so context always comes first. */
-      if (s.predict && mode === 'watch') { pause(); afterNarration(() => showPredict(s)); return; }
+      if (s.predict && mode === 'watch') {
+        pause();
+        if (suppressOverlay) { afterNarration(() => {}); return; } /* lesson shell owns this checkpoint */
+        afterNarration(() => showPredict(s));
+        return;
+      }
       if (s.drive && mode === 'drive') { pause(); afterNarration(() => showDrive(s)); return; }
       if (playing) { autoAdvance(); } /* keep the playback chain alive in BOTH modes */
     }
 
     function autoAdvance() {
       clearTimer();
-      let held = 0;
+      const s = steps[idx];
+      const text = s ? (s.narration || s.caption || '') : '';
+      /* hold at least as long as the sentence takes to speak — the voice is
+         the clock, but when an engine reports "not speaking" too early we
+         still fall back to the estimate so steps never machine-gun past
+         half-heard narration. */
+      const minHold = prefs.narration
+        ? Math.min(CF.Narrator.estimateMs(text, prefs.speed || 1), 20000)
+        : stepWaitMs();
+      const t0 = Date.now();
+      let settled = false;
       const tick = () => {
-        if (destroyed || !playing) return;
-        /* narrator still mid-sentence → hold the step, recheck every
-           250 ms (cap ≈ +6 s so a stuck voice engine can't freeze it) */
-        if (CF.Narrator.isSpeaking() && held < 24) {
-          held++;
-          timer = setTimeout(tick, 250);
-          return;
-        }
+        if (destroyed || !playing || settled) return;
+        const el = Date.now() - t0;
+        if (el < minHold || voiceBusy()) { timer = setTimeout(tick, 200); return; }
+        settled = true;
         stepForward();
       };
-      timer = setTimeout(tick, stepWaitMs());
+      timer = setTimeout(tick, Math.min(stepWaitMs(), minHold));
     }
 
     function togglePlay() {
@@ -1090,6 +1130,7 @@ CF.Visualizer = (() => {
 
     /* ── predict overlay (watch mode) ── */
     function showPredict(s) {
+      if (suppressOverlay) return; /* lesson shell renders its own checkpoint */
       stats.predicts.total++;
       overlay.style.display = 'flex';
       overlay.innerHTML = `
@@ -1188,21 +1229,15 @@ CF.Visualizer = (() => {
       });
     }
 
-    /* finish detection: fire onDone once the last step has been shown.
-       LAG FIX: poll the voice from t≈0 instead of sleeping for a full
-       duration estimate first — completion lands the moment narration ends. */
+    /* finish detection: fire onDone once the last step has been shown —
+       using the same voice-locked pacing as normal steps, so the "Next"
+       button never appears while the closing sentence is still spoken. */
     const origRender = renderStep;
     renderStep = function () {
       origRender();
       if (idx >= steps.length - 1 && !steps[idx].drive && !steps[idx].predict) {
         clearTimer();
-        let held = 0;
-        const tick = () => {
-          if (destroyed || doneFired) return;
-          if (CF.Narrator.isSpeaking() && held < 24) { held++; timer = setTimeout(tick, 250); return; }
-          fireDone();
-        };
-        timer = setTimeout(tick, Math.min(stepMs() * 0.8, 1200));
+        afterNarration(() => fireDone());
       }
     };
 
