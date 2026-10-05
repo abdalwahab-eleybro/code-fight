@@ -2973,7 +2973,7 @@ CF.Lessons = (() => {
             <button class="btn primary" id="lsnNext">Next: Break it ▶</button>`;
           container.querySelector('#lsnNext').addEventListener('click', () => renderBreak(container, session));
         };
-        showSpiralCard(container, session, '#lsnMount', '.lsn-market-mount', 'Next: break it', finish);
+        showSpiralCard(container, session, '#lsnMount', '#lsnNote', 'Next: break it', finish);
       }
     });
     container._player = player;
