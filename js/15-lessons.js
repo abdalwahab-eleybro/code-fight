@@ -1858,7 +1858,7 @@ CF.Lessons = (() => {
           <div class="lsn-prob-setup">${esc(pb.setup)}</div>
           <div class="lsn-prob-ask">${esc(pb.ask)}</div>
           <div class="lsn-stage-mini" id="probStage"></div>
-          <div class="lsn-prob-aux" id="probAux">${pb.mode === 'pair' ? 'Tap <b>two</b> cells.' : pb.mode === 'ends' ? 'Tap the <b>two</b> tiles that swap first.' : 'Tap the <b>first</b> and <b>last</b> cell of the stretch.'}</div>
+          <div class="lsn-prob-aux" id="probAux">${pb.mode === 'pair' ? 'Tap <b>two</b> cells.' : pb.mode === 'ends' ? 'Tap the <b>two</b> tiles that swap first.' : pb.mode === 'free' || (pb.mode === 'stretch' && !pb.query && !(pb.target != null && pb.winLen != null)) ? 'Explore: tap any cells — then continue when you feel it.' : 'Tap the <b>first</b> and <b>last</b> cell of the stretch.'}</div>
         </div>
         <div class="lsn-nav">
           <button class="btn ghost" id="lsnSkip">Skip ▶</button>
@@ -1872,6 +1872,8 @@ CF.Lessons = (() => {
     const nextBtn = container.querySelector('#lsnNext');
     container.querySelector('#lsnSkip').addEventListener('click', () => renderBrute(container, session));
     let sel = [], solved = false;
+    const freeMode = pb.mode === 'free' || (pb.mode === 'stretch' && !pb.query && !(pb.target != null && pb.winLen != null));
+    if (freeMode) nextBtn.disabled = false;   /* open-ended task: learner explores, then continues */
 
     function paint(markClass) {
       const marks = {};
@@ -1883,6 +1885,7 @@ CF.Lessons = (() => {
           const i = Number(cell.dataset.i);
           if (sel.includes(i)) { sel = sel.filter(x => x !== i); }
           else { sel.push(i); if (sel.length > 2) sel.shift(); }
+          if (freeMode) { paint('cmp'); aux.innerHTML = sel.length ? `Tapped ${sel.join(', ')} — keep exploring, then continue when you feel the shape of it.` : 'Explore: tap any cells.'; return; }
           evaluate();
         });
       });
@@ -2107,9 +2110,45 @@ CF.Lessons = (() => {
   /*  Watch / Drive / Practice phases all come from the same  */
   /*  narrated trace; checkpoints ride along as data choices. */
   /* ═══════════════════════════════════════════════════════ */
+  /* ── Watch narration from idea steps: "before" snapshots + reveal lines.
+     Each step narrates the CURRENT scene as it looked BEFORE the move, then
+     asks the learner to predict; after they answer, the move itself is
+     revealed with its `why`. The player's voice-lock guarantees the question
+     card only appears once the intro sentence has fully finished speaking. ── */
+  function watchStepsFromIdea(sc) {
+    const steps = sc.idea.steps;
+    const out = [];
+    steps.forEach((st, i) => {
+      const prev = i > 0 ? steps[i - 1].state : st.state;
+      const intro = i === 0
+        ? 'Here is the whole run, one move at a time. ' + st.text
+        : 'This is where we stand now. ' + st.text;
+      const s = { line: -1, caption: st.word, narration: intro, state: prev };
+      if (i < steps.length - 1) {
+        const nxt = steps[i + 1];
+        const words = [...new Set(steps.slice(i + 1).map(x => x.word))].slice(0, 3);
+        s.choice = {
+          q: 'You heard the move that just landed. What happens NEXT?',
+          options: [nxt.text, ...words.filter(w => w !== nxt.word).slice(0, 2).map(w => 'The ' + w + ' move comes next.')],
+          correct: 0,
+          why: nxt.text + (nxt.why ? ' — ' + nxt.why : '')
+        };
+      } else {
+        s.choice = null; delete s.choice;
+      }
+      out.push(s);
+      const rev = { line: -1, caption: '→ ' + st.word, narration: st.word + '. ' + (st.why || st.text), state: st.state };
+      if (st.fx) rev.fx = st.fx;
+      out.push(rev);
+    });
+    return out;
+  }
+
   function makeSheetLesson(id, sc) {
     const note = (NEW_DATA.SHEET_NOTES || {})[id] || '';
-    const mkTrace = () => buildTrace({ code: sc.watchCode || [], steps: sc.watch || [] }, 'watch');
+    const wt = watchStepsFromIdea(sc);
+    const mkWatch = () => buildTrace({ code: sc.codeMap.lines.map(l => l.code), steps: wt }, 'watch');
+    const mkDrive = () => buildTrace({ code: sc.codeMap.lines.map(l => l.code), steps: sc.idea.steps.map(st => ({ line: -1, caption: st.word, narration: st.text, state: st.state, fx: st.fx })) }, 'drive');
     return {
       id,
       icon: sc.icon || '🧠',
@@ -2132,18 +2171,35 @@ CF.Lessons = (() => {
       triggers: sc.triggers,
       codeMap: sc.codeMap,
       recognize: sc.recognize,
-      watch: mkTrace,
-      drive: mkTrace,
-      practice: mkTrace,
+      watch: mkWatch,
+      drive: mkDrive,
+      practice: mkDrive,
       bug: sc.bug || null,
       misconceptionCard: sc.misconceptionCard || null,
       invariant: sc.invariant,
       proof: sc.proof || null,
       explain: sc.explain,
       fightLabel: sc.fightLabel || ('Lessons · ' + (sc.title || id)),
-      bugTrap: sc.bugTrap || null
+      bugTrap: sc.bugTrap || null,
+      /* Break-phase trace built from the sheet's bugTrap data */
+      bug: sc.bug || (() => {
+        const bt = sc.bugTrap; if (!bt) return null;
+        const first = sc.idea.steps[0] && sc.idea.steps[0].state;
+        return {
+          code: ['# 🐛 ' + bt.title, '# symptom: ' + bt.symptom],
+          steps: [
+            { line: 0, caption: 'the trap', narration: bt.title + '. The symptom: ' + bt.symptom, state: first, fx: { type: 'buzz' } },
+            { line: 1, caption: 'the fix', narration: 'The fix: ' + bt.fix, state: first, auxNote: bt.fix }
+          ]
+        };
+      })()
     };
   }
+
+  /* ── Merge every sheet lesson into the playable list (order follows the sheet) ── */
+  Object.keys(NEW_SCRIPTS).forEach(id => {
+    if (!LESSONS.some(l => l.id === id)) LESSONS.push(makeSheetLesson(id, NEW_SCRIPTS[id]));
+  });
 
   /* ── PHASE 2 · BRUTE-FORCE LAB — feel the cost ── */
   function renderBrute(container, session) {
@@ -2207,6 +2263,8 @@ CF.Lessons = (() => {
   /* ── PHASE 3 · THE IDEA — pure visual, one action word per step ── */
   function renderIdea(container, session) {
     const ls = session.lesson, idea = ls.idea;
+    session_idea_steps = (idea && idea.steps) || []; /* feeds the Two-Camera widget */
+    if (!(idea && Array.isArray(idea.steps) && idea.steps.length)) { renderTriggers(container, session); return; }
     container.innerHTML = `
       <div class="lsn-wrap">
         ${phaseBar(session, 'Idea')}
@@ -2362,6 +2420,7 @@ CF.Lessons = (() => {
           <div class="lsn-bridge-row"><b>The bridge:</b> every line below is one action word from the previous phase — you already know all of them. This phase just gives each word its code shape.</div>
         </div>
         <div class="flow-box" id="cmFlow" style="display:none"></div>
+        <div id="cmCams"></div>
         <div class="lsn-card plain">
           <div>${cm.lines.map((l, i) => `
             <div class="lsn-slot" id="cmSlot${i}"><span class="num">${i + 1}</span><span class="code" id="cmCode${i}">▢▢▢▢</span><span class="note" id="cmNote${i}"></span></div>`).join('')}
@@ -2397,13 +2456,17 @@ CF.Lessons = (() => {
             fb.innerHTML = '✅ That is the whole algorithm. Every action word you learned already had a code shape — this is what "knowing the pattern" means.';
             /* reveal the control-flow map: the code you just assembled, as one picture */
             const flowHost = container.querySelector('#cmFlow');
-            if (flowHost && CF.Flow && LSN_FLOWS[ls.id]) {
+            const flowData = LSN_FLOWS[ls.id] || (NEW_SCRIPTS[ls.id] && NEW_SCRIPTS[ls.id].flow);
+            if (flowHost && CF.Flow && flowData) {
               flowHost.style.display = '';
               flowHost.innerHTML = '<div class="flow-hint">🗺️ And here is the whole thing as ONE picture — click any box to trace its path.</div>';
               const svgHost = document.createElement('div');
               flowHost.appendChild(svgHost);
-              CF.Flow.mountFlow(svgHost, LSN_FLOWS[ls.id]);
+              CF.Flow.mountFlow(svgHost, flowData);
             }
+            /* Two cameras: world ↔ code, locked step by step */
+            const camsHost = container.querySelector('#cmCams');
+            if (camsHost) mountTwoCameras(camsHost, cm);
             CF.Sonify.fx('win', {});
             CF.Narrator.speak('That is the whole algorithm. Every action word you already knew had a code shape.');
             nextBtn.disabled = false;
@@ -2784,7 +2847,7 @@ CF.Lessons = (() => {
 
   function renderBreak(container, session) {
     const ls = session.lesson;
-    const hasBug = !!ls.bug;
+    const hasBug = !!(ls.bug && typeof ls.bug === 'function');
     try { container._player && container._player.destroy(); } catch (e) {}
 
     container.innerHTML = `
@@ -2799,6 +2862,7 @@ CF.Lessons = (() => {
 
     if (hasBug) {
       const trace = ls.bug();
+      if (!trace) { renderExplain(container, session); return; }
       const player = CF.Visualizer.createPlayer({
         container: mount, trace, mode: 'watch',
         onDone: () => {
@@ -2814,6 +2878,7 @@ CF.Lessons = (() => {
     } else {
       /* card-style misconception (p6: the crash, not a trace) */
       const mc = ls.misconceptionCard;
+      if (!mc) { renderExplain(container, session); return; }
       mount.innerHTML = `
         <div class="lsn-card plain misconception">
           <div class="lsn-mc-title">⚠️ ${esc(mc.title)}</div>
@@ -2836,6 +2901,7 @@ CF.Lessons = (() => {
         <div class="lsn-hintline">🗣️ <b>Explain it back.</b> Self-explanation is where understanding actually forms. Answer in your own words — the AI grades Socratically and never just hands you the answer.</div>
         <div class="lsn-card plain">
           <div class="lsn-q">${esc(ls.explain.question)}</div>
+          ${ls.proof ? '<div id="lsnProof"></div>' : ''}
           <textarea class="lsn-textarea" id="lsnText" rows="4" placeholder="Type your explanation…"></textarea>
           <div class="lsn-ai-actions">
             ${AI.isConfigured()
@@ -2850,6 +2916,7 @@ CF.Lessons = (() => {
     wireQuit(container, session);
     const fbBox = container.querySelector('#lsnFb');
     const mcBox = container.querySelector('#lsnMcBox');
+    if (ls.proof) mountProof(container.querySelector('#lsnProof'), ls.proof);
 
     function showContinue(verdict) {
       session.explainVerdict = verdict;
