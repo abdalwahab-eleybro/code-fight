@@ -547,3 +547,11 @@
 .lsn-cam-pre .cam-done { display: block; color: #64748b; }
 .lsn-cam-pre .cam-off  { display: block; color: #334155; }
 .lsn-cams-cap { font-size: 13px; color: #e2e8f0; line-height: 1.65; margin: 10px 0; }
+
+/* ═══ Manim-style choreography polish (sceneFx layer) ═══ */
+/* register --h so heat-colour tweens smoothly alongside the px bar height */
+@property --h { syntax: '<number>'; inherits: false; initial-value: 50; }
+/* arcs and packets must be positioned relative to the stage, not the page */
+.vz-stage { position: relative; }
+/* ring pulses sit above dimmed neighbours so focus reads clearly */
+.vz-cell.vz-ring { z-index: 3; }
