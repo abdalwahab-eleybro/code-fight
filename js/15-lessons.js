@@ -86,8 +86,9 @@ CF.Lessons = (() => {
 
       const tooSmall = s < target;
 
-      /* watch mode: prediction checkpoints on the first two decisions */
-      if (mode === 'watch' && preOpts.includes(decisionCount)) {
+      /* watch mode: prediction checkpoints on every decision (restored —
+         comprehension checks must punctuate the whole trace, not just its start) */
+      if (mode === 'watch') {
         cmp.predict = {
           q: `sum = ${s} ${tooSmall ? '<' : '>'} ${target}. Which pointer moves next?`,
           options: tooSmall ? ['L += 1', 'R -= 1'] : ['R -= 1', 'L += 1'],
@@ -253,7 +254,6 @@ CF.Lessons = (() => {
     });
 
     let left = 0, total = 0, best = Infinity;
-    let predicted = false;
 
     for (let right = 0; right < n; right++) {
       /* decision: grow */
@@ -293,9 +293,9 @@ CF.Lessons = (() => {
 
       while (total >= target) {
         const len = right - left + 1;
-        /* watch-mode prediction on the first valid window */
-        if (mode === 'watch' && !predicted) {
-          predicted = true;
+        /* watch-mode prediction on EVERY valid window (comprehension checks
+         should punctuate the whole trace, not just its first moment) */
+        if (mode === 'watch') {
           steps.push({
             line: 3,
             caption: `total = ${total} ≥ ${target} — the window is VALID`,
@@ -547,20 +547,22 @@ CF.Lessons = (() => {
         };
         qStep.caption = `sumRange(${l}, ${r}) — pick the right subtraction`;
         qStep.narration = '';
-      } else if (qi === 0) {
-        qStep.predict = {
-          q: `sumRange(${l}, ${r}): what does prefix[${r + 1}] − prefix[${l}] equal?`,
-          options: [String(answer), String(prefix[r + 1]), String(prefix[l]), String(answer + 1)],
-          correct: 0,
-          why: `${prefix[r + 1]} − ${prefix[l]} = ${answer}. One subtraction, no loop.`
-        };
-      } else if (qi === 1 && mode === 'watch') {
-        qStep.predict = {
-          q: `Now a query that starts at index 0: sumRange(0, ${r}). Which subtraction works?`,
-          options: [`prefix[${r + 1}] − prefix[0]`, `prefix[${r + 1}] − prefix[1]`, `This case needs a loop`],
-          correct: 0,
-          why: `prefix[0] is the leading zero — it represents "the sum of nothing". That is exactly what a query starting at index 0 needs to subtract.`
-        };
+      } else if (mode === 'watch') {
+        /* checkpoint on EVERY query — understanding checks keep firing
+           through the whole trace, not only on the first one or two */
+        qStep.predict = (l === 0)
+          ? {
+              q: `This query starts at index 0: sumRange(0, ${r}). Which subtraction works?`,
+              options: [`prefix[${r + 1}] − prefix[0]`, `prefix[${r + 1}] − prefix[1]`, 'This case needs a loop'],
+              correct: 0,
+              why: `prefix[0] is the leading zero — it represents "the sum of nothing". That is exactly what a query starting at index 0 needs to subtract.`
+            }
+          : {
+              q: `sumRange(${l}, ${r}): what does prefix[${r + 1}] − prefix[${l}] equal?`,
+              options: [String(answer), String(prefix[r + 1]), String(prefix[l]), String(answer + 1)],
+              correct: 0,
+              why: `${prefix[r + 1]} − ${prefix[l]} = ${answer}. One subtraction, no loop.`
+            };
       }
       steps.push(qStep);
 
@@ -809,14 +811,14 @@ CF.Lessons = (() => {
         fx: { type: 'compare', indices: [L, R] }
       };
       if (mode === 'watch') {
-        if (preOpts.includes(decisionCount)) {
-          bound.predict = {
-            q: `L = ${L} and R = ${R} — both hands point at letters. What does the loop body do first?`,
-            options: ['swap s[L] ↔ s[R]', 'return immediately', 'R -= 1'],
-            correct: 0,
-            why: `The strict bound L < R is true, so the body runs — and the swap is the body's whole job.`
-          };
-        }
+        /* checkpoint on EVERY bound decision — the learner must keep
+           predicting, not just at the start of the trace */
+        bound.predict = {
+          q: `L = ${L} and R = ${R} — both hands point at letters. What does the loop body do first?`,
+          options: ['swap s[L] ↔ s[R]', 'return immediately', 'R -= 1'],
+          correct: 0,
+          why: `The strict bound L < R is true, so the body runs — and the swap is the body's whole job.`
+        };
         steps.push(bound);
       }
 
@@ -1781,6 +1783,95 @@ CF.Lessons = (() => {
     nextBtn.addEventListener('click', () => renderBrute(container, session));
   }
 
+  /* ═══════════════════════════════════════════════════════ */
+  /*  INTERACTIVE FLOWCHARTS (CF.Flow) + CONTEXT CARDS       */
+  /*  · one control-flow diagram per lesson — click a node   */
+  /*    to send an animated packet along its edges           */
+  /*  · "how we got here" card shown before any code appears, */
+  /*    so the learner always knows what the code is FOR      */
+  /* ═══════════════════════════════════════════════════════ */
+  const LSN_FLOWS = {
+    f1: { focus: 'guard', nodes: [
+      { id: 'start', kind: 'start', label: 'reverse(s)', x: 250, y: 16, w: 130, h: 40 },
+      { id: 'guard', kind: 'decision', label: 'len(s) < 2?', x: 235, y: 96, note: 'the seatbelt' },
+      { id: 'init', kind: 'process', label: 'L = 0\nR = n − 1', x: 235, y: 188, note: 'two hands, opposite ends' },
+      { id: 'bound', kind: 'decision', label: 'L < R ?', x: 235, y: 276, note: 'strict bound = finish line' },
+      { id: 'swap', kind: 'process', label: 'swap s[L] ↔ s[R]', x: 460, y: 276, w: 160, note: 'in place — no extra memory' },
+      { id: 'step', kind: 'process', label: 'L += 1\nR -= 1', x: 460, y: 366, w: 160 },
+      { id: 'done', kind: 'stop', label: 'done', x: 20, y: 276, w: 110 }
+    ], edges: [
+      { from: 'start', to: 'guard' },
+      { from: 'guard', to: 'done', label: 'yes', branch: 'yes' },
+      { from: 'guard', to: 'init', label: 'no', branch: 'no' },
+      { from: 'init', to: 'bound' },
+      { from: 'bound', to: 'swap', label: 'true', branch: 'yes' },
+      { from: 'bound', to: 'done', label: 'false', branch: 'no' },
+      { from: 'swap', to: 'step' },
+      { from: 'step', to: 'bound', dashed: true, via: [[540, 240], [380, 240]] }
+    ] },
+    p1: { focus: 'cmp', nodes: [
+      { id: 'start', kind: 'start', label: 'sorted nums, target', x: 250, y: 16, w: 150, h: 40 },
+      { id: 'init', kind: 'process', label: 'L = 0 · R = n−1', x: 245, y: 92 },
+      { id: 'bound', kind: 'decision', label: 'L < R ?', x: 245, y: 176 },
+      { id: 'cmp', kind: 'decision', label: 'nums[L]+nums[R]\nvs target', x: 235, y: 266, w: 170, note: 'the only comparison' },
+      { id: 'mvL', kind: 'process', label: 'too small →\nL += 1', x: 470, y: 258, w: 140 },
+      { id: 'mvR', kind: 'process', label: 'too big →\nR -= 1', x: 20, y: 258, w: 140 },
+      { id: 'ret', kind: 'stop', label: 'return [L+1, R+1]', x: 460, y: 176, w: 160 }
+    ], edges: [
+      { from: 'start', to: 'init' },
+      { from: 'init', to: 'bound' },
+      { from: 'bound', to: 'cmp', label: 'yes', branch: 'yes' },
+      { from: 'cmp', to: 'ret', label: '=', branch: 'yes', via: [[560, 240]] },
+      { from: 'cmp', to: 'mvL', label: '< target', branch: 'no' },
+      { from: 'cmp', to: 'mvR', label: '> target', branch: 'no' },
+      { from: 'mvL', to: 'bound', dashed: true, via: [[540, 150], [400, 150]] },
+      { from: 'mvR', to: 'bound', dashed: true, via: [[90, 150], [200, 150]] }
+    ] },
+    p4: { focus: 'valid', nodes: [
+      { id: 'start', kind: 'start', label: 'positive nums, target', x: 250, y: 16, w: 160, h: 40 },
+      { id: 'grow', kind: 'process', label: 'total += nums[R]\nwindow grows', x: 245, y: 96, w: 160 },
+      { id: 'valid', kind: 'decision', label: 'total ≥ target?', x: 240, y: 190, w: 170, note: 'is the window legal?' },
+      { id: 'rec', kind: 'process', label: 'best = min(best,\nR − L + 1)', x: 470, y: 182, w: 160 },
+      { id: 'shrink', kind: 'process', label: 'total −= nums[L]\nL += 1', x: 470, y: 276, w: 160, note: 'shrink while still valid' },
+      { id: 'next', kind: 'io', label: 'R += 1\nnext element', x: 20, y: 190, w: 140 },
+      { id: 'done', kind: 'stop', label: 'return best', x: 245, y: 300, w: 150 }
+    ], edges: [
+      { from: 'start', to: 'grow' },
+      { from: 'grow', to: 'valid' },
+      { from: 'valid', to: 'rec', label: 'yes', branch: 'yes' },
+      { from: 'valid', to: 'next', label: 'no', branch: 'no' },
+      { from: 'rec', to: 'shrink' },
+      { from: 'shrink', to: 'valid', label: 'loop', dashed: true, via: [[550, 150], [400, 150]] },
+      { from: 'next', to: 'grow', dashed: true, via: [[90, 60], [250, 60]] },
+      { from: 'next', to: 'done', dashed: true }
+    ] },
+    p6: { focus: 'build', nodes: [
+      { id: 'start', kind: 'start', label: 'static nums', x: 250, y: 16, w: 130, h: 40 },
+      { id: 'zero', kind: 'io', label: 'prefix = [0]', x: 245, y: 92, note: 'the leading zero kills edge cases' },
+      { id: 'build', kind: 'process', label: 'append last + x', x: 235, y: 176, w: 160, note: 'one pass, O(n)' },
+      { id: 'q', kind: 'decision', label: 'query(l, r)?', x: 245, y: 264 },
+      { id: 'ans', kind: 'stop', label: 'prefix[r+1]\n− prefix[l]', x: 470, y: 256, w: 150, note: 'O(1) — no loop, ever' }
+    ], edges: [
+      { from: 'start', to: 'zero' },
+      { from: 'zero', to: 'build' },
+      { from: 'build', to: 'build', label: 'next x', dashed: true, via: [[420, 140]] },
+      { from: 'build', to: 'q' },
+      { from: 'q', to: 'ans', label: 'yes', branch: 'yes' },
+      { from: 'q', to: 'q', label: 'more queries', dashed: true, via: [[120, 220]] }
+    ] }
+  };
+
+  function mountLessonFlow(mountEl, lsId) {
+    if (!mountEl || !CF.Flow || !LSN_FLOWS[lsId]) return;
+    const box = document.createElement('div');
+    box.className = 'flow-box';
+    box.innerHTML = '<div class="flow-hint">🗺️ This is the algorithm\u2019s whole shape. <b>Click any box</b> — watch the packet travel along its path.</div>';
+    const svgHost = document.createElement('div');
+    box.appendChild(svgHost);
+    mountEl.appendChild(box);
+    CF.Flow.mountFlow(svgHost, LSN_FLOWS[lsId]);
+  }
+
   /* ── PHASE 2 · BRUTE-FORCE LAB — feel the cost ── */
   function renderBrute(container, session) {
     const ls = session.lesson, br = ls.brute;
@@ -1788,6 +1879,11 @@ CF.Lessons = (() => {
     container.innerHTML = `
       <div class="lsn-wrap">
         ${phaseBar(session, 'Brute')}
+        <div class="lsn-bridge lsn-card">
+          <div class="lsn-bridge-row"><b>Where we are:</b> you just solved the task by hand in the previous phase — that instinct IS this code.</div>
+          <div class="lsn-bridge-row"><b>What this code does:</b> it replays your plain plan literally — try a pair, check it, try the next. Nothing clever.</div>
+          <div class="lsn-bridge-row"><b>Why we show it:</b> to <em>feel</em> the cost. Watch the counter climb as the input grows.</div>
+        </div>
         <div class="lsn-hintline">🐢 <b>Feel the cost.</b> This is the plain, obvious plan — watch the counter climb. The 🤔 pause asks you to predict the damage first.</div>
         <div class="lsn-player-mount" id="lsnMount"></div>
         <div class="lsn-nav"><span class="lsn-next-note" id="lsnNote">Watch the plain plan run — then see how it scales.</span></div>
@@ -1968,6 +2064,10 @@ CF.Lessons = (() => {
       <div class="lsn-wrap">
         ${phaseBar(session, 'Code')}
         <div class="lsn-hintline">🧩 <b>Words → code.</b> ${esc(cm.intro)}</div>
+        <div class="lsn-bridge lsn-card">
+          <div class="lsn-bridge-row"><b>The bridge:</b> every line below is one action word from the previous phase — you already know all of them. This phase just gives each word its code shape.</div>
+        </div>
+        <div class="flow-box" id="cmFlow" style="display:none"></div>
         <div class="lsn-card plain">
           <div>${cm.lines.map((l, i) => `
             <div class="lsn-slot" id="cmSlot${i}"><span class="num">${i + 1}</span><span class="code" id="cmCode${i}">▢▢▢▢</span><span class="note" id="cmNote${i}"></span></div>`).join('')}
@@ -2001,6 +2101,15 @@ CF.Lessons = (() => {
           if (placed === cm.lines.length) {
             fb.className = 'lsn-fb ok';
             fb.innerHTML = '✅ That is the whole algorithm. Every action word you learned already had a code shape — this is what "knowing the pattern" means.';
+            /* reveal the control-flow map: the code you just assembled, as one picture */
+            const flowHost = container.querySelector('#cmFlow');
+            if (flowHost && CF.Flow && LSN_FLOWS[ls.id]) {
+              flowHost.style.display = '';
+              flowHost.innerHTML = '<div class="flow-hint">🗺️ And here is the whole thing as ONE picture — click any box to trace its path.</div>';
+              const svgHost = document.createElement('div');
+              flowHost.appendChild(svgHost);
+              CF.Flow.mountFlow(svgHost, LSN_FLOWS[ls.id]);
+            }
             CF.Sonify.fx('win', {});
             CF.Narrator.speak('That is the whole algorithm. Every action word you already knew had a code shape.');
             nextBtn.disabled = false;
@@ -2098,6 +2207,7 @@ CF.Lessons = (() => {
       </div>`;
     wireQuit(container, session);
     const mount = container.querySelector('#lsnMount');
+    mountLessonFlow(mount, ls.id);
     const trace = ls.watch();
     const player = CF.Visualizer.createPlayer({
       container: mount, trace, mode: 'watch',
@@ -2128,6 +2238,7 @@ CF.Lessons = (() => {
     wireQuit(container, session);
     const mount = container.querySelector('#lsnMount');
     const trace = ls.drive();
+    mountLessonFlow(mount, ls.id);
     const player = CF.Visualizer.createPlayer({
       container: mount, trace, mode: 'drive',
       onDone: (stats) => {

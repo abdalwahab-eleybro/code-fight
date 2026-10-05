@@ -36,17 +36,35 @@
   /* ── Stage: array cells + pointer layer ── */
   .vz-stage { position: relative; padding: 4px 2px 2px; min-height: 140px; }
   .vz-row { display: flex; justify-content: center; gap: 6px; }
+  @property --h { syntax: '<percentage>'; inherits: false; initial-value: 60%; }
   .vz-cell {
+    position: relative;
     min-width: 46px; height: 46px; padding: 0 6px;
     display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
     border: 2px solid var(--border); border-radius: 10px;
     background: linear-gradient(180deg, hsl(215 55% var(--h) / .42), hsl(215 55% var(--h) / .12));
-    transition: border-color .25s, box-shadow .25s, opacity .25s;
+    transition: border-color .25s, box-shadow .25s, opacity .25s, --h .45s cubic-bezier(.4,0,.2,1);
   }
+  /* the animated bar behind the value — a real px height CSS can tween */
+  .vz-fill {
+    position: absolute; left: 3px; bottom: 3px; width: calc(100% - 6px);
+    min-height: 6px; border-radius: 7px; pointer-events: none;
+    background: linear-gradient(180deg, rgba(96,165,250,.55), rgba(96,165,250,.16));
+    transition: height .45s cubic-bezier(.4,0,.2,1);
+  }
+  .vz-cell.cmp   .vz-fill { background: linear-gradient(180deg, rgba(34,211,238,.6), rgba(34,211,238,.16)); }
+  .vz-cell.write .vz-fill { background: linear-gradient(180deg, rgba(34,197,94,.6), rgba(34,197,94,.16)); }
+  .vz-cell.win   .vz-fill { background: linear-gradient(180deg, rgba(251,191,36,.65), rgba(251,191,36,.18)); }
+  .vz-cell.out   .vz-fill { opacity: .3; }
   .vz-val {
+    position: relative; z-index: 1;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-weight: 800; font-size: 15px; color: #fff;
   }
+  /* hard-cut fade when the scene structurally re-lays out (3b1b-style continuity) */
+  @keyframes vz-cut { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .vz-stage.vz-cut > * { animation: vz-cut .35s ease both; }
   .vz-row.small { margin-top: 0; }
   .vz-row.small .vz-cell { min-width: 36px; height: 34px; border-radius: 8px; }
   .vz-row.small .vz-val { font-size: 12px; }
@@ -356,3 +374,28 @@
   .lsn-wordbtn.bad { border-color: var(--enemy); color: var(--enemy); opacity: .8; }
   .lsn-wordbtn:disabled { cursor: default; }
   .lsn-idea-why { margin-top: 7px; font-size: 12.5px; color: var(--player); line-height: 1.55; background: rgba(34, 211, 238, .05); border-radius: 8px; padding: 6px 10px; }
+
+  /* ── Interactive flowcharts (CF.Flow) — click a node to send a packet ── */
+  .flow-box { margin: 10px 0; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); }
+  .flow-hint { font-size: 11.5px; color: var(--muted); text-align: center; margin-bottom: 4px; }
+  .flow-svg { display: block; width: 100%; height: auto; max-height: 340px; }
+  .flow-node { cursor: pointer; outline: none; }
+  .flow-shape {
+    fill: rgba(148, 163, 184, .08); stroke: var(--flow-col, #64748b); stroke-width: 2;
+    transition: fill .25s, stroke-width .25s, filter .25s;
+  }
+  .flow-node:hover .flow-shape, .flow-node:focus .flow-shape { fill: rgba(148, 163, 184, .18); }
+  .flow-node.sel .flow-shape {
+    fill: color-mix(in srgb, var(--flow-col, #22d3ee) 22%, transparent);
+    stroke-width: 3; filter: drop-shadow(0 0 8px color-mix(in srgb, var(--flow-col, #22d3ee) 55%, transparent));
+  }
+  .flow-label { fill: #fff; font-size: 12px; font-weight: 700; pointer-events: none; }
+  .flow-note { fill: var(--muted); font-size: 10px; pointer-events: none; }
+  .flow-edge { fill: none; stroke: #475569; stroke-width: 2; transition: stroke .25s, stroke-width .25s; }
+  .flow-edge.pulse { stroke: var(--player); stroke-width: 3; animation: flow-dash 1.2s linear; }
+  @keyframes flow-dash { from { stroke-dasharray: 6 6; stroke-dashoffset: 48; } to { stroke-dashoffset: 0; } }
+  .flow-edge-label { font-size: 10px; font-weight: 800; }
+  .flow-packet {
+    fill: var(--flow-col, #22d3ee);
+    filter: drop-shadow(0 0 6px var(--flow-col, #22d3ee));
+  }

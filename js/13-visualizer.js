@@ -397,7 +397,7 @@ CF.Flow = (() => {
         const mk = e.branch ? `url(#flow-arw-${e.branch})` : `url(#flow-arw-${kind})`;
         const d = 'M ' + all.map(p => `${p.x} ${p.y}`).join(' L ');
         const path = el('path', {
-          d, fill: 'none', stroke: col, 'stroke-width': '2',
+          d, class: 'flow-edge',
           'stroke-dasharray': e.dashed ? '6 5' : 'none',
           'marker-end': mk, opacity: '.75'
         });
@@ -651,7 +651,8 @@ CF.Visualizer = (() => {
           cell.className = 'vz-cell ' + (mk || '');
           cell.dataset.i = i;
           cell.style.setProperty('--h', '36%');
-          cell.innerHTML = `<span class="vz-val">${esc(v)}</span>`;
+          cell.innerHTML = `<span class="vz-fill" style="height:14px"></span>` +
+                           `<span class="vz-val">${esc(v)}</span>`;
           row.appendChild(cell);
         });
         r2wrap.appendChild(row);
