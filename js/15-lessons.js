@@ -2141,6 +2141,17 @@ CF.Lessons = (() => {
   function watchStepsFromIdea(sc) {
     const steps = sc.idea.steps;
     const out = [];
+    /* POLISH #8: the intro step carries its OWN choreography — a halo
+       pulse under the first in-play pointer plus rings on everything
+       already marked. The walkthrough opens with motion, not a static frame. */
+    let firstRing = [], firstPulse = null;
+    for (const st of steps) {
+      const p = (st.state && st.state.ptrs) || {};
+      if (Object.keys(p).length) { firstPulse = Object.values(p)[0]; break; }
+    }
+    if (steps[0] && steps[0].state && steps[0].state.marks) {
+      firstRing = Object.keys(steps[0].state.marks).map(Number).filter(n => !Number.isNaN(n)).slice(0, 6);
+    }
     steps.forEach((st, i) => {
       const prev = i > 0 ? steps[i - 1].state : st.state;
       const intro = i === 0
@@ -3198,7 +3209,9 @@ CF.Lessons = (() => {
     try {
       S.profile.lessons = S.profile.lessons || {};
       const first = !S.profile.lessons[ls.id]?.completed;
-      const xp = first ? 40 : 10;
+      // XP boost: if a chest multiplier is active, lesson XP rides it too.
+      const baseXP = first ? 40 : 10;
+      const xp = (window.CF && CF.Rewards) ? CF.Rewards.applyXPBoost(baseXP) : baseXP;
       const coins = first ? 20 : 0;
       S.addXP(xp);
       if (coins) S.addCoins(coins);
@@ -3238,6 +3251,13 @@ CF.Lessons = (() => {
       renderPicker(container);
     });
     container.querySelector('#lsnFight').addEventListener('click', () => handlers.onFight(ls.id));
+
+    /* 🎁 Variable-reward chest: fires once per lesson, first time only.
+       The roll already happened server-side-style inside showChest; the
+       prize is granted when the learner taps OPEN IT. */
+    if (window.CF && CF.Rewards && reward && reward.first) {
+      setTimeout(() => { try { CF.Rewards.showChest({ context: ls.title + ' complete' }); } catch (e) {} }, 900);
+    }
   }
 
   /* ── PUBLIC ENTRY ── */
