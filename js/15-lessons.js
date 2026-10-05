@@ -1889,22 +1889,44 @@ CF.Lessons = (() => {
     container.querySelector('#lsnQuit2')?.addEventListener('click', q);
   }
 
-  /* ── PHASE 1 · THE PROBLEM — concrete, zero jargon ── */
+  /* ── PHASE 1 · THE PROBLEM — concrete, zero jargon ──
+     REWRITTEN (freeze fix + interactivity):
+     · ONE persistent scene graph. Selection state lives in `marks`,
+       so every repaint morphs the SAME cells instead of wiping the
+       stage — pointers glide, values roll, marks bloom.
+     · Click handlers are wired ONCE on freshly built cells (the old
+       version re-bound listeners to nodes the engine may have reused
+       or removed mid-animation — taps silently died).
+     · Live math readout: as soon as one tile is picked, its value
+       rides on an auxiliary chip; the second pick shows the running
+       sum / window instantly — before any verdict. Feedback comes
+       from the animation itself, not only from text.
+     · Wrong answers SHAKE the offending tiles and retire them with a
+       self-drawing arc; the correct pair blooms gold with a token
+       riding the arc between them.
+     · No timers gate this phase at all — the freeze could never
+       survive here, and pacing belongs to the player, not the task. */
   function renderProblem(container, session) {
     const ls = session.lesson, pb = ls.problem;
+    const mode = pb.mode;
+    const freeMode = mode === 'free' || (mode === 'stretch' && !pb.query && !(pb.target != null && pb.winLen != null));
+    const promptTxt = mode === 'pair' ? 'Tap <b>two</b> tiles that add up to the target.'
+      : mode === 'ends' ? 'Tap the <b>two</b> tiles that swap first.'
+      : freeMode ? 'Explore: tap any cells — then continue when you feel it.'
+      : 'Tap the <b>first</b> and <b>last</b> cell of the stretch.';
     container.innerHTML = `
       <div class="lsn-wrap">
         ${phaseBar(session, 'Problem')}
-        <div class="lsn-hintline">🎯 <b>The problem first.</b> No jargon, no code — just you versus the task. Try it with your own eyes.</div>
+        <div class="lsn-hintline">🎯 <b>The problem first.</b> No jargon, no code — just you versus the task. Tap the tiles; they answer back.</div>
         <div class="lsn-card plain">
           <div class="lsn-prob-setup">${esc(pb.setup)}</div>
           <div class="lsn-prob-ask">${esc(pb.ask)}</div>
           <div class="lsn-stage-mini" id="probStage"></div>
-          <div class="lsn-prob-aux" id="probAux">${pb.mode === 'pair' ? 'Tap <b>two</b> cells.' : pb.mode === 'ends' ? 'Tap the <b>two</b> tiles that swap first.' : pb.mode === 'free' || (pb.mode === 'stretch' && !pb.query && !(pb.target != null && pb.winLen != null)) ? 'Explore: tap any cells — then continue when you feel it.' : 'Tap the <b>first</b> and <b>last</b> cell of the stretch.'}</div>
+          <div class="lsn-prob-aux" id="probAux">${promptTxt}</div>
         </div>
         <div class="lsn-nav">
           <button class="btn ghost" id="lsnSkip">Skip ▶</button>
-          <button class="btn primary" id="lsnNext" disabled>Continue: feel the cost ▶</button>
+          <button class="btn primary" id="lsnNext" ${freeMode ? '' : 'disabled'}>Continue: feel the cost ▶</button>
         </div>
       </div>`;
     wireQuit(container, session);
@@ -1913,109 +1935,187 @@ CF.Lessons = (() => {
     const aux = container.querySelector('#probAux');
     const nextBtn = container.querySelector('#lsnNext');
     container.querySelector('#lsnSkip').addEventListener('click', () => renderBrute(container, session));
-    let sel = [], solved = false;
-    const freeMode = pb.mode === 'free' || (pb.mode === 'stretch' && !pb.query && !(pb.target != null && pb.winLen != null));
-    if (freeMode) nextBtn.disabled = false;   /* open-ended task: learner explores, then continues */
 
-    function paint(markClass) {
-      const marks = {};
-      sel.forEach(i => { marks[i] = markClass; });
-      CF.Visualizer.renderScene(stage, { arr: pb.arr, ptrs: {}, marks });
-      stage.querySelectorAll('.vz-cell').forEach(cell => {
+    let sel = [], solved = false, attempts = 0;
+
+    /* build the target scene for the current selection — pure data,
+       the engine diffs it against what is already on screen */
+    function sceneFor(marks, fxSpec) {
+      const st = { arr: pb.arr.slice(), ptrs: {}, marks: marks || {} };
+      if (mode === 'pair' && !freeMode) {
+        if (sel[0] != null) st.ptrs['L'] = sel[0];
+        if (sel[1] != null) st.ptrs['R'] = sel[1];
+      } else if (mode === 'stretch' && !freeMode) {
+        if (sel.length === 2) {
+          st.ptrs['l'] = Math.min(sel[0], sel[1]);
+          st.ptrs['r+1'] = Math.min(Math.max(sel[0], sel[1]) + 1, pb.arr.length);
+          for (let k = Math.min(sel[0], sel[1]); k <= Math.max(sel[0], sel[1]); k++) {
+            if (!st.marks[k]) st.marks[k] = 'cmp';
+          }
+        } else if (sel.length === 1) st.ptrs['l'] = sel[0];
+      } else if (mode === 'ends' && !freeMode) {
+        if (sel[0] != null) st.ptrs['L'] = sel[0];
+        if (sel[1] != null) st.ptrs['R'] = sel[1];
+      }
+      return { state: st, fx: fxSpec || null };
+    }
+
+    /* live math chips — the numbers move WITH the taps */
+    function mathChips(l, r, cls) {
+      const out = [];
+      if (mode === 'pair') {
+        if (sel[0] != null) out.push({ label: 'pick 1', value: String(pb.arr[sel[0]]) });
+        if (sel.length === 2) out.push({ label: 'sum', value: String(pb.arr[l] + pb.arr[r]) });
+        out.push({ label: 'target', value: String(pb.target) });
+      } else if (mode === 'stretch' && !freeMode) {
+        if (sel.length === 2) {
+          const s = pb.arr.slice(l, r + 1).reduce((a, b) => a + b, 0);
+          out.push({ label: 'window', value: `[${l}…${r}]` }, { label: 'sum', value: String(s) });
+          if (pb.query) out.push({ label: 'want', value: `[${pb.query[0]}…${pb.query[1]}]` });
+          else out.push({ label: 'need ≥', value: String(pb.target) }, { label: 'rooms', value: String(r - l + 1) });
+        } else if (sel.length === 1) out.push({ label: 'from', value: String(sel[0]) });
+      } else if (mode === 'ends') {
+        if (sel.length === 2) out.push({ label: 'gap', value: String(Math.abs(l - r) + 1) });
+      }
+      return out;
+    }
+
+    function shakeCells(indices) {
+      indices.forEach(i => {
+        const c = stage.querySelector(`.vz-cell[data-i="${i}"]`);
+        if (c && c.animate) c.animate(
+          [{ transform: 'translateX(0)' }, { transform: 'translateX(-5px)' }, { transform: 'translateX(5px)' },
+           { transform: 'translateX(-3px)' }, { transform: 'translateX(0)' }],
+          { duration: 320, easing: 'ease-out' });
+      });
+    }
+
+    function paint(scene) {
+      CF.Visualizer.renderScene(stage, scene.state, { fx: scene.fx });
+      /* wire taps on brand-new cells exactly once (reused nodes keep
+         their original listener — same dataset.i, same closure) */
+      stage.querySelectorAll('.vz-cell:not([data-wired])').forEach(cell => {
+        cell.dataset.wired = '1';
         cell.addEventListener('click', () => {
           if (solved) return;
           const i = Number(cell.dataset.i);
           const wasSelected = sel.includes(i);
-          if (wasSelected) { sel = sel.filter(x => x !== i); }
-          else { sel.push(i); if (sel.length > 2) sel.shift(); }
-          /* TACTILE SPRING: the tapped tile answers with a bounce —
-             selection should feel like pressing a physical key */
+          if (wasSelected) sel = sel.filter(x => x !== i);
+          else { sel.push(i); if (!freeMode && sel.length > 2) sel.shift(); }
+          /* TACTILE SPRING — tapping a tile must feel like pressing a key */
           if (cell.animate && !wasSelected) {
             cell.animate([
               { transform: 'scale(1)' }, { transform: 'scale(.86)', offset: .3 },
               { transform: 'scale(1.08)', offset: .7 }, { transform: 'scale(1)' }
             ], { duration: 340, easing: 'cubic-bezier(.34,1.56,.64,1)' });
-            CF.Sonify.fx('init', {});
+            CF.Sonify.fx('tick', {});
           }
-          if (freeMode) { paint('cmp'); aux.innerHTML = sel.length ? `Tapped ${sel.join(', ')} — keep exploring, then continue when you feel the shape of it.` : 'Explore: tap any cells.'; return; }
+          if (freeMode) {
+            const marks = {}; sel.forEach(k => { marks[k] = 'cmp'; });
+            paint(sceneFor(marks));
+            aux.innerHTML = sel.length
+              ? `Tapped ${sel.slice().sort((a, b) => a - b).join(', ')} — keep exploring, then continue when you feel the shape of it.`
+              : promptTxt;
+            return;
+          }
           evaluate();
         });
       });
     }
 
+    function celebrate(l, r, msg) {
+      solved = true;
+      CF.Sonify.fx('win', {});
+      const marks = {};
+      if (mode === 'stretch') for (let k = l; k <= r; k++) marks[k] = 'win';
+      else { marks[l] = 'win'; marks[r] = 'win'; }
+      const st = sceneFor(marks).state;
+      st.aux = mathChips(l, r, 'win').concat([{ label: 'solved', value: '✓', done: true }]);
+      paint({ state: st, fx: { dim: false, ring: [l, r].filter(n => n != null), arc: (r - l > 0) ? [l, r] : null, token: true, color: '#fbbf24' } });
+      aux.innerHTML = msg;
+      nextBtn.disabled = false;
+      if (nextBtn.animate) nextBtn.animate(
+        [{ transform: 'scale(1)' }, { transform: 'scale(1.07)' }, { transform: 'scale(1)' }],
+        { duration: 420, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+    }
+
+    function reject(l, r, msg, opts) {
+      opts = opts || {};
+      attempts++;
+      CF.Sonify.fx(opts.soft ? 'grow' : 'buzz', {});
+      const marks = {};
+      if (opts.keepWindow && mode === 'stretch') for (let k = l; k <= r; k++) marks[k] = 'out';
+      paint(sceneFor(marks, opts.arc ? { dim: false, ring: [l, r], arc: [l, r], color: '#f87171' } : null));
+      shakeCells([l, r]);
+      aux.innerHTML = msg + (attempts >= 3 && !opts.soft
+        ? '<br><span class="lsn-prob-hint">💡 Hint: ' + esc(opts.hint || 'look at the extremes first — the answer usually hides at the edges.') + '</span>'
+        : '');
+      /* selection stays visible for a beat, then clears for a fresh try */
+      setTimeout(() => {
+        if (solved) return;
+        sel = [];
+        paint(sceneFor({}, null));
+      }, 900);
+    }
+
     function evaluate() {
-      if (sel.length < 2) { paint('cmp'); aux.innerHTML = 'One more…'; return; }
-      const [x, y] = sel;
-      if (pb.mode === 'pair') {
-        const s = pb.arr[x] + pb.arr[y];
+      if (sel.length === 0) { paint(sceneFor({})); aux.innerHTML = promptTxt; return; }
+      if (sel.length < 2) {
+        /* single pick: show its live contribution instead of dead air */
+        const st = sceneFor({ [sel[0]]: 'cmp' }).state;
+        st.aux = mathChips(sel[0], sel[0]);
+        paint({ state: st, fx: { dim: false, pulse: sel[0], color: '#22d3ee' } });
+        aux.innerHTML = mode === 'pair'
+          ? `Picked <b>${pb.arr[sel[0]]}</b> — now tap its partner (one more tile).`
+          : mode === 'stretch'
+            ? `Window opens at <b>${sel[0]}</b> — tap the LAST cell of the stretch.`
+            : 'One tile marked — tap the other end.';
+        return;
+      }
+      const l = Math.min(sel[0], sel[1]), r = Math.max(sel[0], sel[1]);
+
+      if (mode === 'pair') {
+        const s = pb.arr[l] + pb.arr[r];
         if (s === pb.target) {
-          solved = true;
-          CF.Sonify.fx('win', {});
-          paint('win');
-          aux.innerHTML = `✓ ${pb.arr[x]} + ${pb.arr[y]} = ${pb.target}. ${esc(pb.punch)}`;
-          nextBtn.disabled = false;
+          celebrate(l, r, `✓ ${pb.arr[l]} + ${pb.arr[r]} = ${pb.target}. ${esc(pb.punch)}`);
         } else {
-          CF.Sonify.fx('buzz', {});
-          sel = []; /* fresh attempt: clear the wrong pair */
-          paint('cmp');
-          aux.innerHTML = `${pb.arr[x]} + ${pb.arr[y]} = ${s} — not ${pb.target}. Tap two fresh cells.`;
+          reject(l, r,
+            `<b>${pb.arr[l]} + ${pb.arr[r]} = ${s}</b> — ${s > pb.target ? 'too big' : 'too small'}, not ${pb.target}. Two fresh tiles.`,
+            { hint: `the pair must balance around ${pb.target / 2} — aim wide, then close in.` });
         }
-      } else if (pb.mode === 'ends') {
-        if (Math.min(x, y) === 0 && Math.max(x, y) === pb.arr.length - 1) {
-          solved = true;
-          CF.Sonify.fx('win', {});
-          paint('win');
-          aux.innerHTML = `✓ The two ends trade places — that is primitive 3, the in-place swap. ${esc(pb.punch)}`;
-          nextBtn.disabled = false;
+      } else if (mode === 'ends') {
+        if (l === 0 && r === pb.arr.length - 1) {
+          celebrate(l, r, `✓ The two ends trade places — that is primitive 3, the in-place swap. ${esc(pb.punch)}`);
         } else {
-          CF.Sonify.fx('buzz', {});
-          sel = [];
-          paint('cmp');
-          aux.innerHTML = 'Not those two — which pair trades places FIRST?';
+          reject(l, r, 'Not those two — <b>which pair trades places FIRST?</b>',
+            { hint: 'the outermost pair goes first; inner pairs wait their turn.' });
         }
       } else {
-        const l = Math.min(x, y), r = Math.max(x, y);
         const cells = pb.arr.slice(l, r + 1);
         const s = cells.reduce((a, b) => a + b, 0);
         const len = r - l + 1;
-        if (pb.query) { /* exact stretch asked for */
+        if (pb.query) {
           if (l === pb.query[0] && r === pb.query[1]) {
-            solved = true;
-            CF.Sonify.fx('win', {});
-            paint('win');
-            aux.innerHTML = `✓ ${s}. But notice — you had to walk ${len} cells, and the NEXT question would walk them all again. ${esc(pb.punch)}`;
-            nextBtn.disabled = false;
+            celebrate(l, r, `✓ Sum ${s}. But notice — you walked ${len} cells, and the NEXT question would walk them all again. ${esc(pb.punch)}`);
           } else {
-            CF.Sonify.fx('buzz', {});
-            sel = [];
-            paint('cmp');
-            aux.innerHTML = `That is cells ${l}…${r}, not ${pb.query[0]}…${pb.query[1]}. Tap cells ${pb.query[0]} and ${pb.query[1]}.`;
+            reject(l, r, `That is cells ${l}…${r}, not ${pb.query[0]}…${pb.query[1]}. Tap cells <b>${pb.query[0]}</b> and <b>${pb.query[1]}</b>.`,
+              { keepWindow: true, hint: 'count from zero: the first cell is index 0.' });
           }
-        } else { /* shortest stretch reaching target */
-          if (s >= pb.target) {
-            if (len === pb.winLen) {
-              solved = true;
-              CF.Sonify.fx('win', {});
-              paint('win');
-              aux.innerHTML = `✓ ${s} with only ${len} rooms — nothing shorter exists. ${esc(pb.punch)}`;
-              nextBtn.disabled = false;
-            } else {
-              CF.Sonify.fx('grow', {});
-              sel = [];
-              paint('cmp');
-              aux.innerHTML = `Valid — ${s} ≥ ${pb.target}, but that took ${len} rooms. The best answer is shorter. Tap a fresh pair.`;
-            }
+        } else {
+          if (s >= pb.target && len === pb.winLen) {
+            celebrate(l, r, `✓ ${s} with only ${len} rooms — nothing shorter exists. ${esc(pb.punch)}`);
+          } else if (s >= pb.target) {
+            reject(l, r, `Valid — <b>${s} ≥ ${pb.target}</b>, but that took ${len} rooms. The best answer is shorter.`,
+              { keepWindow: true, soft: true, arc: true, hint: `the winning window spans ${pb.winLen} rooms — slide yours tighter.` });
           } else {
-            CF.Sonify.fx('buzz', {});
-            sel = [];
-            paint('cmp');
-            aux.innerHTML = `${s} < ${pb.target} — not enough yet. Tap a fresh, wider stretch.`;
+            reject(l, r, `<b>${s} &lt; ${pb.target}</b> — not enough yet. Tap a wider stretch.`,
+              { keepWindow: true, soft: true, arc: true, hint: 'widen the window until the running sum crosses the target.' });
           }
         }
       }
     }
 
-    paint('cmp');
+    paint(sceneFor({}));
     nextBtn.addEventListener('click', () => renderBrute(container, session));
   }
 

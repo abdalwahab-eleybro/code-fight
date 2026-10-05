@@ -900,8 +900,13 @@ CF.Visualizer = (() => {
 
   /* ── sceneFx: rings, dim focus, self-drawing arcs + packet rides,
         halo pulses. All positioned from live cell rects so they work
-        inside the player stage AND the mini stages alike. ── */
-  function applySceneFx(stage, state, fx) {
+        inside the player stage AND the mini stages alike.
+
+        MEASURE GUARD: when a stage is not laid out yet (jsdom, hidden
+        tab, zero-size container) every rect collapses to 0×0 — drawing
+        then paints invisible garbage. Skip the paint and re-check on
+        the next frame instead. ── */
+  function applySceneFx(stage, state, fx, _retry) {
     let svg = stage.querySelector(':scope > .vz-fx-svg');
     if (!fx) {
       stage.querySelectorAll('.vz-cell.vz-ring, .vz-cell.vz-dim').forEach(c => c.classList.remove('vz-ring', 'vz-dim'));
@@ -910,6 +915,10 @@ CF.Visualizer = (() => {
     }
     const cells = Array.from(stage.querySelectorAll(':scope > .vz-row > .vz-cell'));
     const sr = stage.getBoundingClientRect();
+    if ((!sr.width || !sr.height) && !_retry) {
+      requestAnimationFrame(() => applySceneFx(stage, state, fx, true));
+      return;
+    }
     const centers = cells.map(c => {
       const r = c.getBoundingClientRect();
       return { x: r.left - sr.left + r.width / 2, y: r.top - sr.top + r.height / 2, w: r.width, h: r.height };
