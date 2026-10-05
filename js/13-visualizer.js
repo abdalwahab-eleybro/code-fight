@@ -1204,6 +1204,15 @@ CF.Visualizer = (() => {
       const fxObj = autoFx(s);
       renderScene(stage, s.state || { arr: [] }, { fx: fxObj });
       lastPainted = s.state;
+      /* FREEZE ROOT-CAUSE FIX: onProgress was accepted by createPlayer
+         but NEVER invoked anywhere. Lesson phases (Watch market cards,
+         Drive prompts) rely on this hook to mount their checkpoint UI —
+         without it a 🤔 step paused the player over an empty host: no
+         animation, no question, no escape. That is exactly what looked
+         like "the lesson freezes in the problem/watch section".
+         Fire it for every painted step so hosts can react (mount or
+         clear) deterministically. */
+      if (onProgress) { try { onProgress(idx, s); } catch (e) {} }
       container.querySelector('.vz-progress').textContent = `${idx + 1} / ${steps.length}`;
       codeEl.querySelectorAll('.vz-code-line').forEach(l =>
         l.classList.toggle('active', Number(l.dataset.line) === (s.line ?? -1)));

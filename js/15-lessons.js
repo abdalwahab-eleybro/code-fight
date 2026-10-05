@@ -1937,6 +1937,7 @@ CF.Lessons = (() => {
     container.querySelector('#lsnSkip').addEventListener('click', () => renderBrute(container, session));
 
     let sel = [], solved = false, attempts = 0;
+    let seq = 0; /* sequence guard: stale timers must never stomp newer state */
 
     /* build the target scene for the current selection — pure data,
        the engine diffs it against what is already on screen */
@@ -2042,6 +2043,7 @@ CF.Lessons = (() => {
     function reject(l, r, msg, opts) {
       opts = opts || {};
       attempts++;
+      const mySeq = ++seq; /* this rejection owns the timeline from now on */
       CF.Sonify.fx(opts.soft ? 'grow' : 'buzz', {});
       const marks = {};
       if (opts.keepWindow && mode === 'stretch') for (let k = l; k <= r; k++) marks[k] = 'out';
@@ -2050,9 +2052,13 @@ CF.Lessons = (() => {
       aux.innerHTML = msg + (attempts >= 3 && !opts.soft
         ? '<br><span class="lsn-prob-hint">💡 Hint: ' + esc(opts.hint || 'look at the extremes first — the answer usually hides at the edges.') + '</span>'
         : '');
-      /* selection stays visible for a beat, then clears for a fresh try */
+      /* selection stays visible for a beat, then clears for a fresh try.
+         FREEZE FIX: the old clear timer fired even when the learner had
+         already solved or started a new attempt mid-wait — the stage got
+         stomped back to an empty scene under their fingers and taps
+         appeared dead ("frozen"). Guarded by a sequence token now. */
       setTimeout(() => {
-        if (solved) return;
+        if (solved || mySeq !== seq) return;
         sel = [];
         paint(sceneFor({}, null));
       }, 900);
@@ -3004,7 +3010,9 @@ CF.Lessons = (() => {
        the 🤔 card never mounted and the lesson sat frozen at the first
        checkpoint forever. Voice-lock is a nicety — it may delay the card,
        it must never strand the lesson. */
-    const MAX_WAIT = 15000;
+    const MAX_WAIT = 6000; /* was 15 s: long enough for any intro sentence
+       to hit its estimate cap, short enough that no learner ever sees a
+       "frozen" screen waiting on a wedged voice engine */
     const mountNow = () => {
       if (!alive) return;
       alive = false;
