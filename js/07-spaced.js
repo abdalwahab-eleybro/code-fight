@@ -106,23 +106,40 @@ CF.Spaced = (() => {
     const dueQs = dueCount > 0 ? getDueQuestions(dueCount) : [];
     const dueIds = new Set(dueQs.map(q => q.id));
 
-    // Fill remaining slots from the pattern pool, excluding due ones
+    // Fill remaining slots from the pattern pool, excluding due ones.
+    // INTERLEAVING (research: mixed-family practice transfers better than blocked):
+    // ~40% of fresh slots come from OTHER patterns already exposed to the learner —
+    // forcing classification ("which pattern is this?") before solving.
     const need = total - dueQs.length;
-    let pool = Q.BANK.filter(q =>
+    let ownPool = Q.BANK.filter(q =>
       q.pattern === config.pattern &&
       q.difficulty <= (config.diff || 3) &&
       !dueIds.has(q.id)
     );
-
-    if (pool.length < need) {
-      pool = Q.BANK.filter(q => q.pattern === config.pattern && !dueIds.has(q.id));
+    if (ownPool.length < need) {
+      ownPool = Q.BANK.filter(q => q.pattern === config.pattern && !dueIds.has(q.id));
     }
-    if (pool.length < need) {
-      pool = Q.BANK.filter(q => !dueIds.has(q.id));
-    }
+    const ownCount = Math.max(2, Math.ceil(need * 0.6));
+    const own = Q.shuffle(ownPool).slice(0, ownCount);
+    const used = new Set(dueIds);
+    own.forEach(q => used.add(q.id));
 
-    const fresh = Q.shuffle(pool).slice(0, need);
-    return Q.shuffle([...dueQs, ...fresh]);
+    // Mixed families: prefer patterns whose LESSON the learner has completed
+    // (exposed), fall back to any other pattern at allowed difficulty.
+    let doneLessons = {};
+    try { doneLessons = S.profile.lessons || {}; } catch (e) {}
+    const isExposed = pid => { try { return !!(doneLessons[pid] && doneLessons[pid].completed); } catch (e) { return false; } };
+    let mixPool = Q.BANK.filter(q =>
+      q.pattern !== config.pattern &&
+      q.difficulty <= (config.diff || 3) &&
+      !used.has(q.id) && isExposed(q.pattern)
+    );
+    if (mixPool.length < need - own.length) {
+      mixPool = Q.BANK.filter(q => q.pattern !== config.pattern && q.difficulty <= (config.diff || 3) && !used.has(q.id));
+    }
+    if (!mixPool.length) mixPool = Q.BANK.filter(q => q.pattern !== config.pattern && !used.has(q.id));
+    const mixed = Q.shuffle(mixPool).slice(0, Math.max(0, need - own.length));
+    return Q.shuffle([...dueQs, ...own, ...mixed]);
   }
 
   // Review run: pure due questions

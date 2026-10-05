@@ -1122,6 +1122,7 @@ CF.Lessons = (() => {
   const LESSONS = [
     {
       id: 'f1',
+      tier: 1, level: 1, difficulty: 'Foundation', prereqs: [],
       icon: '🧱',
       title: 'Foundations: 6 Primitives',
       minutes: 13,
@@ -1246,6 +1247,7 @@ CF.Lessons = (() => {
     },
     {
       id: 'p1',
+      tier: 1, level: 2, difficulty: 'Core', prereqs: ['f1'],
       icon: '↔️',
       title: 'Converging Pointers',
       minutes: 13,
@@ -1366,6 +1368,7 @@ CF.Lessons = (() => {
     },
     {
       id: 'p4',
+      tier: 1, level: 3, difficulty: 'Core', prereqs: ['f1'],
       icon: '🪟',
       title: 'Sliding Window',
       minutes: 14,
@@ -1490,6 +1493,7 @@ CF.Lessons = (() => {
     },
     {
       id: 'p6',
+      tier: 1, level: 4, difficulty: 'Core', prereqs: ['f1'],
       icon: '🧮',
       title: 'Prefix Sum',
       minutes: 13,
@@ -1634,18 +1638,31 @@ CF.Lessons = (() => {
   function renderPicker(container) {
     CF.Narrator.stop();
     let doneCount = 0;
-    const cards = LESSONS.map(ls => {
+    const TIERS = [
+      { t: 1, name: 'Tier 1 · Primitives & Core Patterns', blurb: 'The six moves and the three patterns every later lesson is built from. No prerequisites — start here.' },
+      { t: 2, name: 'Tier 2 · Pointer Workhorses', blurb: 'Variations that reuse Tier-1 moves on new shapes. Requires Foundations complete.' },
+      { t: 3, name: 'Tier 3 · Combinations', blurb: 'Patterns composed from two earlier ones — merge+test, window+choice, converging+extra state.' },
+      { t: 4, name: 'Tier 4 · Boss Moves', blurb: 'Two-pattern stacks (prefix+hash, atMost−atMost). The final branches of the tree.' }
+    ];
+    const cardHtml = ls => {
       const st = statusOf(ls.id);
       if (st === 'done') doneCount++;
+      const gate = prereqState(ls);
       return `
-        <div class="lsn-card ${st === 'done' ? 'done' : ''}" data-lesson="${ls.id}">
-          <div class="lsn-icon">${ls.icon}</div>
+        <div class="lsn-card ${st === 'done' ? 'done' : ''} ${gate.locked ? 'locked' : ''}" data-lesson="${ls.id}">
+          <div class="lsn-icon">${gate.locked ? '🔒' : ls.icon}</div>
           <div class="lsn-body">
-            <div class="lsn-name">${esc(ls.title)} ${st === 'done' ? '<span class="lsn-badge">✓ done</span>' : '<span class="lsn-badge new">NEW</span>'}</div>
-            <div class="lsn-desc">Problem → Idea → Code → Drive → Practice → Spot it · ${ls.minutes} min</div>
+            <div class="lsn-name">${esc(ls.title)} ${st === 'done' ? '<span class="lsn-badge">✓ done</span>' : gate.locked ? '<span class="lsn-badge lock">🔒 locked</span>' : '<span class="lsn-badge new">NEW</span>'}</div>
+            <div class="lsn-desc">${ls.difficulty || 'Core'} · ${ls.minutes} min${gate.locked ? ' · needs ' + gate.missing.map(titleOf).join(' + ') : ' · Problem → Idea → Code → Drive → Practice → Spot it'}</div>
           </div>
-          <div class="lsn-go">${st === 'done' ? 'Replay' : 'Start ▶'}</div>
+          <div class="lsn-go">${st === 'done' ? 'Replay' : gate.locked ? '🔒' : 'Start ▶'}</div>
         </div>`;
+    };
+    const tierBlocks = TIERS.map(tr => {
+      const list = LESSONS.filter(l => (l.tier || 1) === tr.t);
+      if (!list.length) return '';
+      return `<div class="lsn-section">${tr.name}</div>
+              <div class="lsn-tier-blurb">${tr.blurb}</div>${list.map(cardHtml).join('')}`;
     }).join('');
 
     const aiStatus = AI.isConfigured()
@@ -1662,7 +1679,7 @@ CF.Lessons = (() => {
       </div>
 
       <div class="lsn-progress">${doneCount} / ${LESSONS.length} lessons completed</div>
-      ${cards}
+      ${tierBlocks}
 
       <div class="lsn-section">AI Tutor (optional)</div>
       <div class="lsn-ai-card">
@@ -1688,7 +1705,10 @@ CF.Lessons = (() => {
 
     container.querySelector('#lsnBack').addEventListener('click', () => handlers.onExit());
     container.querySelectorAll('.lsn-card').forEach(card => {
-      card.addEventListener('click', () => startLesson(card.dataset.lesson, container));
+      card.addEventListener('click', () => {
+        const ls = LESSONS.find(l => l.id === card.dataset.lesson);
+        if (ls) startLockedGuard(ls, container);
+      });
     });
 
     const statusEl = container.querySelector('#aiStatus');
@@ -2144,13 +2164,28 @@ CF.Lessons = (() => {
     return out;
   }
 
+  /* ── Skill-tree metadata for sheet lessons (tier = dependency depth) ── */
+  const SHEET_META = {
+    p2:    { tier: 2, level: 5, difficulty: 'Core',       prereqs: ['f1'] },
+    p3:    { tier: 2, level: 6, difficulty: 'Core',       prereqs: ['f1'] },
+    guard: { tier: 2, level: 7, difficulty: 'Core',       prereqs: ['f1'] },
+    p5:    { tier: 3, level: 8, difficulty: 'Intermediate', prereqs: ['p3'] },
+    p7:    { tier: 3, level: 9, difficulty: 'Intermediate', prereqs: ['p4'] },
+    x1:    { tier: 3, level: 10, difficulty: 'Intermediate', prereqs: ['p1'] },
+    x2:    { tier: 3, level: 11, difficulty: 'Intermediate', prereqs: ['p1', 'p2'] },
+    x8:    { tier: 4, level: 12, difficulty: 'Advanced',   prereqs: ['p6'] },
+    x5:    { tier: 4, level: 13, difficulty: 'Advanced',   prereqs: ['p4', 'p6'] }
+  };
+
   function makeSheetLesson(id, sc) {
+    const meta = SHEET_META[id] || { tier: 2, level: 99, difficulty: 'Core', prereqs: ['f1'] };
     const note = (NEW_DATA.SHEET_NOTES || {})[id] || '';
     const wt = watchStepsFromIdea(sc);
     const mkWatch = () => buildTrace({ code: sc.codeMap.lines.map(l => l.code), steps: wt }, 'watch');
     const mkDrive = () => buildTrace({ code: sc.codeMap.lines.map(l => l.code), steps: sc.idea.steps.map(st => ({ line: -1, caption: st.word, narration: st.text, state: st.state, fx: st.fx })) }, 'drive');
     return {
       id,
+      tier: meta.tier, level: meta.level, difficulty: meta.difficulty, prereqs: meta.prereqs,
       icon: sc.icon || '🧠',
       title: sc.title || id,
       minutes: sc.minutes || 10,
@@ -2196,10 +2231,109 @@ CF.Lessons = (() => {
     };
   }
 
-  /* ── Merge every sheet lesson into the playable list (order follows the sheet) ── */
+  /* ── Merge every sheet lesson into the playable list (dependency order) ── */
   Object.keys(NEW_SCRIPTS).forEach(id => {
     if (!LESSONS.some(l => l.id === id)) LESSONS.push(makeSheetLesson(id, NEW_SCRIPTS[id]));
   });
+  LESSONS.sort((a, b) => (a.level || 99) - (b.level || 99));
+
+  /* ── Prerequisite gating (skill tree) ── */
+  function prereqState(ls) {
+    const need = ls.prereqs || [];
+    const missing = need.filter(pid => statusOf(pid) !== 'done');
+    return { locked: missing.length > 0, missing };
+  }
+  function titleOf(pid) {
+    const f = LESSONS.find(l => l.id === pid);
+    return f ? f.title : pid;
+  }
+  function startLockedGuard(ls, container) {
+    const g = prereqState(ls);
+    if (!g.locked) { startLesson(ls.id, container); return true; }
+    CF.Narrator.stop();
+    const back = () => renderPicker(container);
+    container.innerHTML = `
+      <div class="lsn-wrap">
+        <div class="lsn-gate-card">
+          <div class="lsn-gate-icon">🔒</div>
+          <h3>${esc(ls.icon)} ${esc(ls.title)} is locked</h3>
+          <p>This lesson builds directly on skills you have not completed yet. Finish these first:</p>
+          <div class="lsn-gate-list">${g.missing.map(pid => `<button class="btn ghost lsn-gate-jump" data-pid="${pid}">▶ ${esc(titleOf(pid))}</button>`).join('')}</div>
+          <p class="lsn-gate-note">Each lesson unlocks the next branch of the tree — that ordering is why they feel connected instead of random.</p>
+          <button class="btn primary" id="lsnGateBack">← Back to lessons</button>
+        </div>
+      </div>`;
+    container.querySelector('#lsnGateBack').addEventListener('click', back);
+    container.querySelectorAll('.lsn-gate-jump').forEach(b =>
+      b.addEventListener('click', () => {
+        const p = LESSONS.find(l => l.id === b.dataset.pid);
+        if (p && !prereqState(p).locked) startLesson(p.id, container); else back();
+      }));
+    return false;
+  }
+
+  /* ── Spiral review: force a callback to an EARLIER pattern family at the
+       end of each Watch session (interleaved retrieval, not blocked practice) ── */
+  const SPIRAL_CALLBACKS = {
+    p1: [{ pat: 'f1', q: 'Before pointers move anywhere, what single line must exist first — and what does it protect?' }],
+    p2: [{ pat: 'f1', q: 'Your two taps moved zero elements. Which primitive from lesson one lets a pointer retire a value forever?' }],
+    p4: [{ pat: 'p1', q: 'Converging retired values with ONE comparison. What exactly does the window shrink retire here — and why can we skip re-checking older starts?' }],
+    p3: [{ pat: 'f1', q: 'The write pointer never moves backwards. Name the primitive that guarantees that.' }],
+    guard: [{ pat: 'f1', q: 'You just watched a crash happen in one line. Which primitive number was the seatbelt?' }],
+    p5: [{ pat: 'p3', q: 'Intersection is Merge-with-a-test. When both sides are equal, BOTH pointers advance — what would happen if only one did?' }],
+    p6: [{ pat: 'f1', q: 'The prefix array has one extra cell at the front. Without that leading zero, which query breaks first?' }],
+    p7: [{ pat: 'p4', q: 'Kadane is a window that resizes itself by choice. When extending hurts, what does best-ending-here do that a fixed window cannot?' }],
+    x1: [{ pat: 'p1', q: 'Container With Water converges too — but it moves the SHORTER wall. Why is moving the taller one always wasted work?' }],
+    x2: [{ pat: 'p2', q: 'Three sums is two-sum inside a loop. Which half stays EXACTLY the same as the two-sum you already own?' }],
+    x8: [{ pat: 'p6', q: 'Subarray-sum-K is prefix sums plus a dictionary. What question does the dictionary answer that a plain prefix array cannot?' }],
+    x5: [{ pat: 'p4', q: 'atMost(k) shrinks when the count exceeds k. Exactly-k subtracts two atMost runs — why does that subtraction land on exactly the windows with k odds?' }]
+  };
+  function spiralFor(lsId) {
+    const cb = SPIRAL_CALLBACKS[lsId];
+    if (!cb) return null;
+    const pick = cb[Math.floor(Math.random() * cb.length)];
+    const earlier = LESSONS.filter(l => (l.level || 99) < ((LESSONS.find(x => x.id === lsId) || {}).level || 99));
+    const src = earlier.find(l => l.id === pick.pat) || earlier[0];
+    if (!src) return null;
+    return {
+      icon: '🌀', word: 'SPIRAL REVIEW',
+      text: `${src.icon} Remembers ${src.title}? This new problem hides it. Answer in one sentence before continuing:\n\n“${pick.q}”`,
+      why: 'Spaced callbacks across pattern families are what turn short-term familiarity into long-term transfer — the quiz fights will interleave them too.',
+      fx: { type: 'pulse' }
+    };
+  }
+  function injectSpiral(session) {
+    try {
+      const sp = spiralFor(session.lesson.id);
+      if (sp && session.steps && session.steps.length) {
+        const last = session.steps[session.steps.length - 1];
+        if (!last.spiral) { last.spiral = sp; last.text = (last.text || '') + '\n\n' + sp.text; }
+      }
+    } catch (e) { /* spiral is additive — never break playback */ }
+  }
+
+  /* Spiral card shown after a drive/practice run finishes (before advancing). */
+  function showSpiralCard(container, session, mountSel, noteSel, nextLabel, goNext) {
+    const note = container.querySelector(noteSel);
+    if (!note) { goNext(); return; }
+    let sp = null;
+    try { sp = spiralFor(session.lesson.id); } catch (e) {}
+    if (!sp) { goNext(); return; }
+    note.innerHTML = `
+      <div class="lsn-spiral">
+        <div class="lsn-spiral-head">${sp.icon} SPIRAL REVIEW · reach back to an earlier pattern</div>
+        <div class="lsn-spiral-q">${esc(sp.text)}</div>
+        <textarea class="lsn-input lsn-spiral-input" rows="2" placeholder="Answer in one sentence…"></textarea>
+        <button class="btn primary" id="lsnSpiralGo">${nextLabel} ▶</button>
+      </div>`;
+    const btn = note.querySelector('#lsnSpiralGo');
+    btn.addEventListener('click', () => {
+      const val = (note.querySelector('.lsn-spiral-input').value || '').trim();
+      session.spiralAnswers = session.spiralAnswers || [];
+      session.spiralAnswers.push({ q: sp.text, a: val });
+      goNext();
+    });
+  }
 
   /* ── PHASE 2 · BRUTE-FORCE LAB — feel the cost ── */
   function renderBrute(container, session) {
@@ -2542,11 +2676,9 @@ CF.Lessons = (() => {
       onDone: (stats) => {
         session.practiceStats = stats;
         const note = container.querySelector('#lsnNote');
-        if (note) {
-          note.innerHTML = `Practice mistakes: ${stats.driveMistakes} — ${stats.driveMistakes === 0 ? 'a perfect run. The pattern is yours.' : 'each miss showed you exactly where the instinct is still forming.'}
-            <button class="btn primary" id="lsnNext">Next: quick quiz ▶</button>`;
-          container.querySelector('#lsnNext').addEventListener('click', () => renderQuiz(container, session));
-        }
+        if (!note) return;
+        note.innerHTML = `Practice mistakes: ${stats.driveMistakes} — ${stats.driveMistakes === 0 ? 'a perfect run. The pattern is yours.' : 'each miss showed you exactly where the instinct is still forming.'}`;
+        showSpiralCard(container, session, '#lsnMount', '#lsnNote', 'Next: quick quiz', () => renderQuiz(container, session));
       }
     });
     container._player = player;

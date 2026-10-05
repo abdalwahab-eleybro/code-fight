@@ -420,3 +420,41 @@
   .lsn-market-fb.bad { color: #fca5a5; }
   .lsn-market-skip { margin-top: 10px; font-size: 12px; }
   .lsn-market-done { opacity: .55; transition: opacity .4s; }
+
+/* ── Skill-tree picker: tiers, locks, gate screen ── */
+.lsn-tier-blurb {
+  font-size: 12px; color: var(--muted, #94a3b8); line-height: 1.55;
+  margin: -4px 0 10px; padding-left: 2px;
+}
+.lsn-card.locked { opacity: .45; filter: grayscale(.7); cursor: not-allowed; }
+.lsn-card.locked:hover { border-color: var(--border); transform: none; }
+.lsn-badge.lock { background: rgba(148,163,184,.15); color: #cbd5e1; border: 1px solid rgba(148,163,184,.4); }
+
+.lsn-gate-card {
+  max-width: 520px; margin: 40px auto; text-align: center;
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+  border: 1px solid rgba(251,191,36,.3); border-radius: 16px; padding: 28px 24px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  animation: lsn-gate-in .35s cubic-bezier(.4,0,.2,1);
+}
+@keyframes lsn-gate-in { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } }
+.lsn-gate-icon { font-size: 40px; margin-bottom: 8px; }
+.lsn-gate-card h3 { margin: 0 0 10px; font-size: 18px; color: var(--gold, #fbbf24); }
+.lsn-gate-card p { font-size: 13px; color: var(--muted, #94a3b8); line-height: 1.6; }
+.lsn-gate-list { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; }
+.lsn-gate-jump { width: 100%; text-align: left; }
+.lsn-gate-note { font-size: 12px; font-style: italic; }
+
+/* ── Spiral review card (interleaved retrieval after Drive/Practice) ── */
+.lsn-spiral {
+  margin-top: 12px; padding: 14px 16px;
+  background: rgba(56,189,248,.07); border: 1px solid rgba(56,189,248,.35);
+  border-radius: 12px; animation: lsn-spiral-in .4s cubic-bezier(.4,0,.2,1);
+}
+@keyframes lsn-spiral-in { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
+.lsn-spiral-head {
+  font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+  color: #38bdf8; margin-bottom: 8px;
+}
+.lsn-spiral-q { font-size: 13.5px; line-height: 1.65; color: #e2e8f0; white-space: pre-wrap; margin-bottom: 10px; }
+.lsn-spiral-input { width: 100%; margin-bottom: 10px; resize: vertical; }
