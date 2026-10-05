@@ -1275,8 +1275,14 @@ CF.Visualizer = (() => {
   let fxSeq = 0;   /* invalidates half-finished overlays from earlier steps */
   let fxUid = 0;   /* unique ids for per-arc arrowhead markers */
   function sceneFxLayer(stage, s, fx, opts) {
+    const alive = (opts && opts.alive) || (() => document.contains(stage));
+    const keep = (opts && opts.keep) || null;   /* extra cell indices to keep bright */
     const glided = !!(opts && opts.glided);
     const seq = ++fxSeq;
+    /* EVERY exit path — including "nothing to choreograph" — must clear the
+       previous step's rings/dims. The old version returned early here, so a
+       plain step inherited the PREVIOUS step's dim state: cells stayed faded
+       out with nobody pointing at them, which read as random flicker. */
     const cells = Array.from(stage.querySelectorAll('.vz-cell'));
     cells.forEach(c => { c.classList.remove('vz-dim', 'vz-ring'); });
     stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
@@ -1287,8 +1293,10 @@ CF.Visualizer = (() => {
        from the cells they point at. Wait until the tween lands. */
     const DELAY = glided ? 480 : 60;
     if (fx.dim) {
-      const keep = new Set([].concat(fx.cells || [], fx.from != null ? [fx.from] : [], fx.to != null ? [fx.to] : []));
-      cells.forEach(c => { if (!keep.has(Number(c.dataset.i))) c.classList.add('vz-dim'); });
+      const bright = [].concat(fx.cells || [], keep || [],
+                          fx.from != null ? [fx.from] : [], fx.to != null ? [fx.to] : []);
+      const lit = new Set(bright);
+      cells.forEach(c => { if (!lit.has(Number(c.dataset.i))) c.classList.add('vz-dim'); });
     }
     if (fx.cells) {
       fx.cells.forEach(i => {
@@ -1300,7 +1308,7 @@ CF.Visualizer = (() => {
     const wantToken = fx.token && fx.from != null && fx.to != null;
     if (!wantArc && !wantToken && fx.pulse == null) return;
     setTimeout(() => {
-      if (seq !== fxSeq || !document.contains(stage)) return; /* a newer paint won */
+      if (!alive() || seq !== fxSeq || !document.contains(stage)) return; /* a newer paint won */
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('class', 'vz-fx-svg');
       svg.style.left = '0'; svg.style.top = '0';
@@ -1421,7 +1429,7 @@ CF.Visualizer = (() => {
       /* POLISH #2: arcs are momentary annotations — fade them out so the
          next step never inherits ghost arrows from the previous one */
       setTimeout(() => {
-        if (seq !== fxSeq || !document.contains(svg)) { try { svg.remove(); } catch (e) {} return; }
+        if (!alive() || seq !== fxSeq || !document.contains(svg)) { try { svg.remove(); } catch (e) {} return; }
         try {
           svg.animate([{ opacity: 1 }, { opacity: 0 }],
             { duration: 450, delay: 2400, easing: 'ease-out', fill: 'forwards' });
@@ -1606,7 +1614,7 @@ CF.Visualizer = (() => {
          with a quick fade instead of freezing mid-animation. */
       const glided = glideScene(stage, s.state || { arr: [] });
       stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
-      sceneFx(s, glided); /* manim-style focus/rings/arcs, layered on the fresh scene */
+      sceneFxLayer(stage, s, s.sceneFx, { glided, alive: () => !destroyed }); /* one shared choreographer for every surface */
       container.querySelector('.vz-progress').textContent = `${idx + 1} / ${steps.length}`;
       codeEl.querySelectorAll('.vz-code-line').forEach(l =>
         l.classList.toggle('active', Number(l.dataset.line) === (s.line ?? -1)));
@@ -1623,189 +1631,6 @@ CF.Visualizer = (() => {
           valueHi: numsA.length ? Math.max.apply(null, numsA) : 1
         });
       }
-      /* MANIM-STYLE CHOREOGRAPHY per step (data-driven, opt-in via s.sceneFx):
-         · dim   — every cell not part of this move fades back (focus shift)
-         · ring  — glow rings pulse on the named cells (Transform highlighting)
-         · arc   — a curved arrow draws itself between two cells (swap/move)
-         · glide — travelling packet rides the arc (the "hand" carrying values)
-                   …or an animated value TOKEN flies cell→cell when token set
-         · pulse — a soft expanding halo under one cell (window/center growth)
-         Without sceneFx the old behaviour is untouched: marks only. */
-      let fxSeq = 0;
-      let fxUid = 0; /* unique ids for the per-arc arrowhead markers */
-      function sceneFx(s, glided) {
-        const fx = s.sceneFx;
-        const seq = ++fxSeq; /* invalidates arcs still in flight from earlier steps */
-        const cells = Array.from(stage.querySelectorAll('.vz-cell'));
-        cells.forEach(c => { c.classList.remove('vz-dim', 'vz-ring'); });
-        stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
-        if (!fx) return;
-        const mainRow = stage.querySelector('.vz-row');
-        if (!mainRow) return;
-        /* POLISH #1: never measure mid-glide. Cells and pointers are still
-           CSS-transitioning to their new spots for ~450 ms after a glide —
-           arcs drawn now start/end at stale coordinates and visibly detach
-           from the cells they point at. Wait until the tween lands. */
-        const DELAY = glided ? 480 : 60;
-        if (fx.dim) {
-          const keep = new Set([].concat(fx.cells || [], fx.from != null ? [fx.from] : [], fx.to != null ? [fx.to] : []));
-          cells.forEach(c => { if (!keep.has(Number(c.dataset.i))) c.classList.add('vz-dim'); });
-        }
-        if (fx.cells) {
-          fx.cells.forEach(i => {
-            const c = cells.filter(x => Number(x.dataset.i) === i)[0];
-            if (c) c.classList.add('vz-ring');
-          });
-        }
-        const wantArc = fx.arc && fx.from != null && fx.to != null;
-        const wantToken = fx.token && fx.from != null && fx.to != null;
-        if (!wantArc && !wantToken && !fx.pulse) return;
-        setTimeout(() => {
-          if (destroyed || seq !== fxSeq) return; /* a newer step already painted */
-          const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-          svg.setAttribute('class', 'vz-fx-svg');
-          svg.style.left = '0'; svg.style.top = '0';
-          svg.width = stage.clientWidth || 640; svg.height = stage.clientHeight || 220;
-          const rs = stage.getBoundingClientRect();
-          const liveCells = Array.from(stage.querySelectorAll('.vz-row > .vz-cell'));
-          const centerOf = (i, bottom) => {
-            const c = liveCells.filter(x => Number(x.dataset.i) === i)[0];
-            if (!c) return null;
-            const r = c.getBoundingClientRect();
-            return { x: r.left - rs.left + r.width / 2, y: (bottom ? r.bottom : r.top) - rs.top };
-          };
-          let path = null, len = 0, p1 = null, p2 = null;
-          if (wantArc || wantToken) {
-            p1 = centerOf(fx.from); p2 = centerOf(fx.to);
-            if (p1 && p2) {
-              const col = fx.color || '#fbbf24';
-              const mx = (p1.x + p2.x) / 2, lift = Math.max(34, Math.min(90, Math.abs(p2.x - p1.x) * .38));
-              const d = `M ${p1.x} ${p1.y} Q ${mx} ${Math.min(p1.y, p2.y) - lift} ${p2.x} ${p2.y}`;
-              const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-              const mid = 'fxm' + (++fxUid);
-              const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-              marker.setAttribute('id', mid); marker.setAttribute('viewBox', '0 0 10 10');
-              marker.setAttribute('refX', 8); marker.setAttribute('refY', 5);
-              marker.setAttribute('markerWidth', 7); marker.setAttribute('markerHeight', 7);
-              marker.setAttribute('orient', 'auto-start-reverse');
-              const mp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-              mp.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); mp.setAttribute('fill', col);
-              marker.appendChild(mp); defs.appendChild(marker); svg.appendChild(defs);
-              path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-              path.setAttribute('d', d); path.setAttribute('fill', 'none');
-              if (wantArc) {
-                path.setAttribute('stroke', col); path.setAttribute('stroke-width', 2.5);
-                path.setAttribute('opacity', .9); path.setAttribute('marker-end', `url(#${mid})`);
-              } else {
-                path.setAttribute('stroke', col); path.setAttribute('stroke-width', 1.5);
-                path.setAttribute('opacity', .45); path.setAttribute('stroke-dasharray', '3 5');
-              }
-              svg.appendChild(path);
-              try {
-                len = path.getTotalLength();
-                path.style.strokeDasharray = wantArc ? len : '3 5';
-                path.style.strokeDashoffset = wantArc ? len : 0;
-                if (wantArc) {
-                  path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }],
-                    { duration: 700, delay: 0, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
-                }
-              } catch (e) {}
-            }
-          }
-          /* value TOKEN: a labelled chip that physically carries the number
-             from cell to cell along the arc — Manim's Transform(Mobject) look */
-          if (wantToken && path && len) {
-            const v = (s.state && Array.isArray(s.state.arr)) ? s.state.arr[fx.from] : '';
-            const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            rect.setAttribute('x', -13); rect.setAttribute('y', -12);
-            rect.setAttribute('width', 26); rect.setAttribute('height', 24);
-            rect.setAttribute('rx', 7);
-            rect.setAttribute('fill', fx.color || '#fbbf24');
-            rect.setAttribute('opacity', '.95');
-            const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('dy', 5);
-            txt.setAttribute('font-size', '13'); txt.setAttribute('font-weight', '800');
-            txt.setAttribute('font-family', 'ui-monospace, Menlo, monospace');
-            txt.setAttribute('fill', '#0a0e1a');
-            txt.textContent = String(v == null ? '' : v).slice(0, 3);
-            g.appendChild(rect); g.appendChild(txt);
-            g.style.transform = `translate(${p1.x}px, ${p1.y}px)`;
-            svg.appendChild(g);
-            const frames = [];
-            for (let k = 0; k <= 36; k++) {
-              const pt = path.getPointAtLength(len * k / 36);
-              frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)` });
-            }
-            try {
-              g.animate(frames, { duration: 1000, delay: 250, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
-              rect.animate([{ opacity: .95 }, { opacity: .95 }, { opacity: 0 }],
-                { duration: 1250, delay: 250, easing: 'ease-in', fill: 'forwards' });
-              txt.animate([{ opacity: .95 }, { opacity: .95 }, { opacity: 0 }],
-                { duration: 1250, delay: 250, easing: 'ease-in', fill: 'forwards' });
-            } catch (e) {}
-          } else if (fx.glide && path && len) {
-            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            dot.setAttribute('r', 5.5); dot.setAttribute('cx', 0); dot.setAttribute('cy', 0);
-            dot.setAttribute('fill', fx.color || '#fbbf24');
-            dot.style.transform = `translate(${p1.x}px, ${p1.y}px)`;
-            svg.appendChild(dot);
-            const frames = [];
-            for (let k = 0; k <= 36; k++) {
-              const pt = path.getPointAtLength(len * k / 36);
-              frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)` });
-            }
-            try {
-              dot.animate(frames, { duration: 1000, delay: 250, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
-            } catch (e) {}
-          }
-          /* pulse: expanding halo under a cell — window growth, palindrome centers */
-          if (fx.pulse != null) {
-            const pc = centerOf(fx.pulse, true);
-            if (pc) {
-              const halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-              halo.setAttribute('cx', pc.x); halo.setAttribute('cy', pc.y - 23);
-              halo.setAttribute('r', 16); halo.setAttribute('fill', 'none');
-              halo.setAttribute('stroke', fx.color || '#22d3ee');
-              halo.setAttribute('stroke-width', 2);
-              svg.appendChild(halo);
-              try {
-                halo.animate([{ r: 14, opacity: .8 }, { r: 46, opacity: 0 }],
-                  { duration: 1100, delay: 100, easing: 'cubic-bezier(.2,.6,.3,1)', iterations: 2 });
-              } catch (e) {
-                halo.animate([{ transform: 'scale(1)', opacity: .8 }, { transform: 'scale(3)', opacity: 0 }],
-                  { duration: 1100, delay: 100, easing: 'cubic-bezier(.2,.6,.3,1)', iterations: 2 });
-              }
-            }
-          }
-          stage.appendChild(svg);
-          /* POLISH #2: arcs are momentary annotations — fade them out so the
-             next step never inherits ghost arrows from the previous one */
-          setTimeout(() => {
-            if (destroyed || seq !== fxSeq) { try { svg.remove(); } catch (e) {} return; }
-            try {
-              svg.animate([{ opacity: 1 }, { opacity: 0 }],
-                { duration: 450, delay: 2400, easing: 'ease-out', fill: 'forwards' });
-              setTimeout(() => { if (svg.parentNode) svg.remove(); }, 3100);
-            } catch (e) { try { svg.remove(); } catch (e2) {} }
-          }, 0);
-        }, DELAY);
-      }
-
-      CF.Narrator.setRate(prefs.speed || 1);
-      CF.Narrator.speak(s.narration || s.caption || '');
-      /* VOICE-LOCKED CHECKPOINTS: the lesson shell (Watch/Brute phases) used
-         to mount its 🤔 question card on a fixed wall-clock estimate of this
-         sentence. Estimates run long or short → the card either cut in over
-         the narrator's last words, or appeared seconds after the voice ended
-         — silently, below the fold. Now the player owns the clock: lessons
-         poll narrationIdle(), which is true only once the CURRENT step's
-         intro has genuinely been spoken (or, if muted, had reading time). */
-      narrationStartedAt = Date.now();
-      narrationMs = prefs.narration
-        ? Math.min(CF.Narrator.estimateMs(s.narration || s.caption || '', prefs.speed || 1), 20000)
-        : Math.min(stepWaitMs(), 2500);
-      if (onProgress) onProgress(idx, steps.length);
     }
 
     let narrationStartedAt = 0;
@@ -2038,5 +1863,5 @@ CF.Visualizer = (() => {
     return { destroy, goTo, stepForward, narrationIdle, play: () => { if (!playing) togglePlay(); } };
   }
 
-  return { createPlayer, renderScene, animateScene, glideScene };
+  return { createPlayer, renderScene, animateScene, glideScene, sceneFxLayer };
 })();

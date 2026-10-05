@@ -2666,7 +2666,11 @@ CF.Lessons = (() => {
       const prevIdea = i > 0 ? idea.steps[i - 1].state : null;
       const glided = CF.Visualizer.glideScene(stage, st.state);
       stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
-      try { paintIdeaFx(stage, st, bespokeFx(st) || diffSceneFx(prevIdea, st.state), glided); } catch (e) {}
+      /* ONE choreographer for the whole app: the shared sceneFxLayer from
+         CF.Visualizer — identical rings/arcs/tokens/dimming as Watch mode.
+         (The old local `paintIdeaFx` copy never existed — every Idea-phase
+         annotation was silently swallowed by this try/catch.) */
+      try { CF.Visualizer.sceneFxLayer(stage, st, bespokeFx(st) || diffSceneFx(prevIdea, st.state), { glided }); } catch (e) {}
       try { if (st.fx) CF.Sonify.fx(st.fx.type, { ...st.fx, arr: st.state?.arr || [] }); } catch (e) {}
       badge.textContent = st.word;
       textEl.innerHTML = esc(st.text) + (st.why ? `<div class="lsn-idea-why">${esc(st.why)}</div>` : '');
