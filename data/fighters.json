@@ -1,0 +1,46 @@
+{
+  "fighters": [
+    {
+      "id": "ninja",
+      "name": "Ninja",
+      "icon": "🥷",
+      "unlockLevel": 1
+    },
+    {
+      "id": "monk",
+      "name": "Monk",
+      "icon": "🧘",
+      "unlockLevel": 3
+    },
+    {
+      "id": "ronin",
+      "name": "Ronin",
+      "icon": "⚔️",
+      "unlockLevel": 5
+    },
+    {
+      "id": "mage",
+      "name": "Mage",
+      "icon": "🧙",
+      "unlockLevel": 8
+    },
+    {
+      "id": "dragon",
+      "name": "Dragon",
+      "icon": "🐉",
+      "unlockLevel": 12
+    },
+    {
+      "id": "phoenix",
+      "name": "Phoenix",
+      "icon": "🔥",
+      "unlockLevel": 18
+    },
+    {
+      "id": "void",
+      "name": "Void",
+      "icon": "🌌",
+      "unlockLevel": 25
+    }
+  ]
+}

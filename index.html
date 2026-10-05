@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0e1a">
+<title>Code Fighter — Campaign</title>
+<link rel="stylesheet" href="css/core.css">
+<link rel="stylesheet" href="css/learning-lab.css">
+</head>
+<body>
+
+<!-- ═══════ SCREEN: MENU ═══════ -->
+<div class="screen" id="screen-menu">
+  <div class="menu-card">
+    <h1>⚔️ CODE FIGHTER</h1>
+    <p class="tag">Campaign · Volume 1 · Arrays &amp; Strings</p>
+    <div class="menu-options">
+      <button class="menu-btn" id="btnCampaign">
+        <span class="icon">🗺️</span>
+        <div>
+          <strong>Campaign</strong>
+          <small>Linear progression · 52 levels · Vol 1</small>
+        </div>
+      </button>
+      <button class="menu-btn" id="btnLearn">
+        <span class="icon">🎓</span>
+        <div>
+          <strong>Learn — Interactive Lessons</strong>
+          <small>Watch · predict · drive the pointers · AI tutor</small>
+        </div>
+      </button>
+      <button class="menu-btn" id="btnBlitz">
+        <span class="icon">⚡</span>
+        <div>
+          <strong>Blitz Run</strong>
+          <small>10 questions · 10s each · random patterns</small>
+        </div>
+      </button>
+      <button class="menu-btn" id="btnShop">
+        <span class="icon">🛒</span>
+        <div>
+          <strong>Shop</strong>
+          <small>Spend coins on upgrades</small>
+        </div>
+      </button>
+      <button class="menu-btn" id="btnSettings">
+        <span class="icon">⚙️</span>
+        <div>
+          <strong>Settings</strong>
+          <small>Audio, stats, profile, reset</small>
+        </div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ SCREEN: MAP ═══════ -->
+<div class="screen" id="screen-map">
+  <div id="profileBar"></div>
+
+  <div class="map-header">
+    <button class="back-btn" id="btnMapBack">← Menu</button>
+    <div style="flex:1">
+      <div class="map-title">Campaign Map</div>
+      <div class="map-sub" id="mapProgress">0 / 52 levels cleared</div>
+    </div>
+  </div>
+
+  <div id="weakSpotBanner"></div>
+  <div id="reviewNode"></div>
+  <div id="mapList" class="level-list"></div>
+</div>
+
+<!-- ═══════ SCREEN: FIGHT (placeholder) ═══════ -->
+ <div class="screen" id="screen-fight">
+  <!-- HUD -->
+  <header class="fight-hud">
+    <div class="fight-fighter-info">
+      <span class="fight-name">🥷 You</span>
+      <div class="fight-bar"><div class="fight-fill" id="fightPlayerHealth" style="width:100%"></div></div>
+    </div>
+    <div class="fight-timer-box">
+      <div class="fight-timer" id="fightTimer">0:00</div>
+      <div class="fight-timer-label">TIME</div>
+    </div>
+    <div class="fight-fighter-info right">
+      <span class="fight-name enemy-name" id="fightEnemyName">👾 Bot</span>
+      <div class="fight-bar"><div class="fight-fill enemy-fill" id="fightEnemyHealth" style="width:100%"></div></div>
+    </div>
+  </header>
+
+  <!-- Arena -->
+  <div class="arena" id="fightArena">
+    <div class="fighter player" id="fightPlayer">🥷</div>
+    <div class="fighter enemy" id="fightEnemy">👾</div>
+  </div>
+
+  <!-- Question area -->
+  <div class="fight-question-wrap">
+    <div class="boss-banner" id="bossBanner" style="display:none"></div>
+    <div class="fight-question-head">
+      <span class="question-counter" id="questionCounter">Q1 / 5</span>
+      <span class="tier-timer" id="tierTimer" data-tier="perfect">0.0s</span>
+    </div>
+    <div id="questionWrap"></div>
+    <div class="fight-feedback" id="fightFeedback"></div>
+    <div class="fight-actions">
+      <button class="btn ghost" id="fightHint">💡 Hint (−5 HP)</button>
+      <button class="btn ghost" id="fightSkip">⏭ Skip (−10 HP)</button>
+      <button class="btn ghost" id="fightExit">✕ Exit</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ SCREEN: SHOP ═══════ -->
+<div class="screen" id="screen-shop">
+  <div id="shopContent"></div>
+</div>
+
+<!-- ═══════ SCREEN: SETTINGS ═══════ -->
+<div class="screen" id="screen-settings">
+  <div id="settingsContent"></div>
+</div>
+
+<!-- ═══════ SCREEN: RECAP ═══════ -->
+<div class="screen" id="screen-recap">
+  <div id="recapContent"></div>
+</div>
+
+<!-- ═══════ SCREEN: LEARN ═══════ -->
+<div class="screen" id="screen-learn">
+  <div id="learnContent"></div>
+</div>
+
+<!-- ═══════ SCRIPTS ═══════ -->
+<script src="js/00-content.js"></script>
+<script src="js/01-state.js"></script>
+<script src="js/02-campaign.js"></script>
+<script src="js/03-questions.js"></script>
+<script src="js/04-renderers.js"></script>
+<script src="js/05-achievements.js"></script>
+<script src="js/06-modes.js"></script>
+<script src="js/07-spaced.js"></script>
+<script src="js/08-shop.js"></script>
+<script src="js/09-music.js"></script>
+<script src="js/10-screens.js"></script>
+<script src="js/11-engine.js"></script>
+<script src="js/12-settings.js"></script>
+<script src="js/13-visualizer.js"></script>
+<script src="js/14-aitutor.js"></script>
+<script src="js/15b-lesson-content.js"></script>
+<script src="js/15-lessons.js"></script>
+<script src="js/16-shell.js"></script>
+</body>
+</html>
