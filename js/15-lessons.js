@@ -48,6 +48,27 @@ CF.Lessons = (() => {
   /*  TRACE GENERATORS (pure — testable without a DOM)       */
   /* ═══════════════════════════════════════════════════════ */
 
+  /* ── Generic trace builder for the NEW sheet lessons ─────
+     A lesson "script" is plain data: { code, steps:[{line,caption,
+     narration?,state,fx?,predict?|drive?}] }. Watch mode turns each
+     step's `choice` into a 🤔 checkpoint (voice-locked market card);
+     drive mode turns it into an interactive prompt. Content lives in
+     the scripts table below — adding a lesson never touches this code. */
+  function buildTrace(script, mode) {
+    const steps = [];
+    (script.steps || []).forEach((st, i) => {
+      const s = { line: st.line ?? -1, caption: st.caption, narration: st.narration || '', state: st.state, fx: st.fx };
+      if (st.auxNote) s.auxNote = st.auxNote;
+      if (st.choice && mode === 'watch') {
+        s.predict = { q: st.choice.q, options: st.choice.options, correct: st.choice.correct, why: st.choice.why };
+      } else if (st.choice && mode === 'drive') {
+        s.drive = { prompt: st.choice.q, options: st.choice.options, correct: st.choice.correct, why: st.choice.why, hint: st.choice.hint || '' };
+      }
+      steps.push(s);
+    });
+    return { code: script.code || [], steps };
+  }
+
   /* ── P1 · Converging pointers (Two Sum II) ── */
   function twoSumTrace(nums, target, mode, opts = {}) {
     const n = nums.length;
@@ -2014,15 +2035,63 @@ CF.Lessons = (() => {
     ] }
   };
 
+  /* ── MASTER ROUTING FLOWCHART (sheet: "Pattern Selection") ──
+     Interactive decision tree from problem signal to pattern. Clicking a
+     leaf highlights the matching lesson card in the picker below. */
+  const ROUTER_FLOW = { focus: 'read', nodes: [
+    { id: 'read', kind: 'start', label: 'Read the\nproblem', x: 250, y: 12, w: 130, h: 40 },
+    { id: 'd1', kind: 'decision', label: 'sorted or\nsymmetric input?\npairs / ends?', x: 240, y: 84, w: 150, note: 'P1' },
+    { id: 'd2', kind: 'decision', label: 'filter or dedup\nin place?', x: 60, y: 176, w: 150, note: 'P2' },
+    { id: 'd3', kind: 'decision', label: 'fill output\nfrom the end?', x: 240, y: 240, w: 150, note: 'P3' },
+    { id: 'd4', kind: 'decision', label: 'contiguous\nsubarray / substring?', x: 430, y: 176, w: 165, note: 'P4 / P7' },
+    { id: 'd5', kind: 'decision', label: 'two sorted\ninputs?', x: 60, y: 330, w: 140, note: 'P5' },
+    { id: 'd6', kind: 'decision', label: 'range-sum or\nprefix queries?', x: 250, y: 380, w: 150, note: 'P6' },
+    { id: 'l1', kind: 'stop', label: 'P1 · Converging', x: 470, y: 60, w: 150, lesson: 'p1' },
+    { id: 'l2', kind: 'stop', label: 'P2 · Read-Write', x: 10, y: 262, w: 145, lesson: 'p2' },
+    { id: 'l3', kind: 'stop', label: 'P3 · Backwards Write', x: 130, y: 452, w: 165, lesson: 'p3' },
+    { id: 'l4', kind: 'stop', label: 'P4 · Sliding Window', x: 455, y: 292, w: 160, lesson: 'p4' },
+    { id: 'l5', kind: 'stop', label: 'P5 · Two-Array Merge', x: 10, y: 412, w: 105, h: 56, lesson: 'p5' },
+    { id: 'l6', kind: 'stop', label: 'P6 · Prefix Sum', x: 420, y: 400, w: 130, lesson: 'p6' },
+    { id: 'l7', kind: 'stop', label: 'P7 · Kadane', x: 545, y: 150, w: 110, lesson: 'p7' },
+    { id: 'later', kind: 'io', label: '→ Hash / Stack / Tree /\nGraph / DP · Volumes 3–7', x: 430, y: 470, w: 185, h: 46 }
+  ], edges: [
+    { from: 'read', to: 'd1' },
+    { from: 'd1', to: 'l1', label: 'yes', branch: 'yes' },
+    { from: 'd1', to: 'd2', label: 'no', branch: 'no' },
+    { from: 'd2', to: 'l2', label: 'yes', branch: 'yes' },
+    { from: 'd2', to: 'd3', label: 'no', branch: 'no' },
+    { from: 'd3', to: 'l3', label: 'yes', branch: 'yes' },
+    { from: 'd3', to: 'd4', label: 'no', branch: 'no', via: [[315, 316], [315, 214]] },
+    { from: 'd4', to: 'l4', label: 'window rule', branch: 'yes' },
+    { from: 'd4', to: 'l7', label: 'best sum', branch: 'yes' },
+    { from: 'd4', to: 'd5', label: 'no', branch: 'no', via: [[142, 214], [142, 300]] },
+    { from: 'd5', to: 'l5', label: 'yes', branch: 'yes' },
+    { from: 'd5', to: 'd6', label: 'no', branch: 'no' },
+    { from: 'd6', to: 'l6', label: 'yes', branch: 'yes' },
+    { from: 'd6', to: 'later', label: 'no', branch: 'no' }
+  ] };
+
+  /* ── The sheet's Pattern-Selection tree as clickable chips ── */
+  const RECOGNIZE_TREE = [
+    { q: 'Sorted or symmetric input? Need pairs / work from both ends?', a: 'P1 · Converging Pointers', lesson: 'p1', alt: 'one value → Binary Search (Volume 2)' },
+    { q: 'Filter or dedup an array IN PLACE, one pass?', a: 'P2 · Read & Write', lesson: 'p2', alt: 'merge two sorted arrays → P5' },
+    { q: 'Fill an output buffer and you can only write from the END?', a: 'P3 · Backwards Write', lesson: 'p3', alt: '' },
+    { q: 'A CONTIGUOUS subarray/substring with a window rule?', a: 'P4 · Sliding Window', lesson: 'p4', alt: 'exactly k long → X5 trick · longest no-repeat → variable shrink' },
+    { q: 'BEST contiguous sum (max/min subarray)?', a: 'P7 · Kadane', lesson: 'p7', alt: 'with negatives + count subarrays → X8 prefix + hash' },
+    { q: 'TWO sorted inputs combined in one walk?', a: 'P5 · Two-Array Merge', lesson: 'p5', alt: '' },
+    { q: 'FROZEN array + many range-sum / prefix queries?', a: 'P6 · Prefix Sum', lesson: 'p6', alt: 'product ranges → same idea with ×' },
+    { q: 'None of these — needs Hash / Stack / Tree / Graph / DP?', a: 'Volumes 3–7', lesson: null, alt: 'this volume only ships pointer machinery' }
+  ];
+
   function mountLessonFlow(mountEl, lsId) {
-    if (!mountEl || !CF.Flow || !LSN_FLOWS[lsId]) return;
+    if (!mountEl || !CF.Flow || !(LSN_FLOWS[lsId] || NEW_SCRIPTS[lsId])) return;
     const box = document.createElement('div');
     box.className = 'flow-box';
     box.innerHTML = '<div class="flow-hint">🗺️ This is the algorithm\u2019s whole shape. <b>Click any box</b> — watch the packet travel along its path.</div>';
     const svgHost = document.createElement('div');
     box.appendChild(svgHost);
     mountEl.appendChild(box);
-    CF.Flow.mountFlow(svgHost, LSN_FLOWS[lsId]);
+    CF.Flow.mountFlow(svgHost, LSN_FLOWS[lsId] || (NEW_SCRIPTS[lsId] && NEW_SCRIPTS[lsId].flow));
   }
 
   /* ── PHASE 2 · BRUTE-FORCE LAB — feel the cost ── */

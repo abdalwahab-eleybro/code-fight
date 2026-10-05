@@ -1,0 +1,2481 @@
+
+LeetCode Foundations — Volume 1 (Final): 8 Primitives, 7 Patterns & Guarded Skipping
+Printing tip:
+ A4 · Margins: Default · 
+Background graphics: ON
+ · Headers and footers: OFF (page numbers are built in).
+Printable Study Guide · Volume 1 of 7 · Final Edition
+LeetCode Foundations
+8 Code Primitives · 7 Patterns · 1 Cross-Cutting Technique
+Converging · Read & Write · Backwards Write · Sliding Window · Two-Array Merge · Prefix Sum · Kadane · Guarded Skipping
+Converging Two Pointers
+L
+h
+0
+e
+1
+l
+2
+l
+3
+R
+o
+4
+8
+Primitives
+7
+Patterns
+30
+Worked Problems
+7
+Bug Traps
+7
+Volumes
+📌 Philosophy & Reading Order
+Every array algorithm in this volume is assembled from 
+8 core low-level code primitives
+. The first 
+6 primitives
+ — introduced on the next page — cover pointer mechanics, swapping, in-place writes, running state, and guarded skipping. They carry Patterns 1–3 and the Guarded Skipping technique.
+Primitive 7 (window state expand/shrink)
+ is introduced immediately before Sliding Window. 
+Primitive 8 (cumulative state construction)
+ is introduced immediately before Prefix Sum. This keeps the reading order honest: you meet each primitive the moment the next pattern depends on it.
+▶
+ Start Here
+Pattern Selection Flowchart
+Route from problem signal to the right pattern
+ Before you write a line of code, walk this tree. Each leaf points to the pattern in this volume (P1–P7) or to a later volume that covers the required primitives.
+From Problem Signal to Pattern
+Read the problem
+sorted or symmetric
+input?
+pairs / ends
+P1 · Converging
+one value
+Binary Search
+→ Volume 2
+No
+filter or dedup
+in place?
+Yes
+P2 · Read-Write
+No
+fill output
+from the end?
+Yes
+P3 · Backwards Write
+No
+contiguous
+subarray / substring?
+window rule
+P4 · Sliding Window
+best sum
+P7 · Kadane
+No
+range-sum or
+prefix queries?
+Yes
+P6 · Prefix Sum
+No
+two sorted
+inputs?
+Yes
+P5 · Two-Array Merge
+No
+→ Hash / Stack / Tree / Graph / DP · Volumes 3–7
+Variants live in the 
+Extensions
+ section: three-way partition (X.1), outward expansion (X.2), “exactly k” windows (X.5), and prefix + hash for negatives (X.8).
+▶
+ Foundations
+The First 6 Primitives
+Powers Patterns 1–3 and Guarded Skipping
+01
+Pointer & Index Initialization
+O(1) time · O(1) space
+Opposite Ends:
+left = 0
+ and 
+right = len(nums) - 1
+ — scan inward from both boundaries.
+Same Direction:
+slow = 0
+ and 
+fast = 0
+ (or 
+1
+) — filtering or cycle tracking.
+Anchor & Runner:
+left = 0
+ as anchor while 
+for right in range(n)
+ drives the runner.
+Safety Bounds Guard:
+ Check 
+len(nums) == 0
+ or 
+len(nums) == 1
+ before accessing any index.
+02
+Pointer Traversal & Loop Bounds
+O(N) time · O(1) space
+Strict Bound 
+while left < right
+:
+ Stops when 
+left == right
+. Used for element pairs, swaps, and palindromes.
+Inclusive Bound 
+while left <= right
+:
+ Processes the middle element when 
+left == right
+.
+Explicit Step Adjustments:
+left += 1
+, 
+right -= 1
+.
+03
+In-Place Swapping Mechanics
+O(1) per swap · O(1) space
+Python Tuple Unpacking:
+nums[left], nums[right] = nums[right], nums[left]
+.
+Purpose:
+ Reorders elements directly inside existing memory without auxiliary buffers.
+04
+Read & Write Pointers (In-Place Overwriting)
+O(N) time · O(1) space
+Dual Pointer Roles:
+ Read pointer scans every element; write pointer maintains the boundary of valid output.
+The Overwrite Rule:
+ When 
+nums[read]
+ meets the criteria, execute 
+nums[write] = nums[read]
+ then 
+write += 1
+.
+Virtual Array Length:
+ The final value of 
+write
+ is the filtered subarray size.
+05
+Extreme Values & Running State Management
+O(1) per update · O(1) space
+Initialization Standards:
+max_val = float('-inf')
+, 
+min_val = float('inf')
+, 
+running_sum = 0
+.
+State Updates:
+ Recompute each iteration, e.g. 
+max_val = max(max_val, candidate)
+.
+06
+Guarded Skipping (Inner Loops)
+O(N) aggregate · O(1) space
+Element Skipping:
+ Inner 
+while
+ loops advance over non-alphanumeric characters, spaces, or duplicate values.
+Out-of-Bounds Protection Guard:
+Always
+ write 
+while left < right and skip_condition:
+.
+Full chapter:
+ See the cross-cutting technique section in this volume.
+▶
+ Two Pointers Converging
+Pattern 1
+Two bookmarks walking toward each other
+ Two pointers start at opposite ends of a sorted or symmetric data structure and step inward until they meet.
+Example 1.1
+Reverse String
+LeetCode 344
+Reverse a string in-place using 
+O(1)
+ extra memory.
+ Brute Force · O(N) time · O(N) space
+def reverseString_brute_force(s: list[str]) -> None:
+ temp = s[::-1] 
+# O(N) auxiliary space
+ for i in range(len(s)):
+ s[i] = temp[i]
+ Optimal — Two Pointers · O(N) time · O(1) space
+# Primitive 1: Opposite ends initialization
+left = 0
+right = len(s) - 1
+# Primitive 2: Strict bound loop (stops when left == right)
+while left < right:
+# Primitive 3: In-place tuple swap
+ s[left], s[right] = s[right], s[left]
+# Primitive 2: Explicit pointer movement
+ left += 1
+ right -= 1
+ Algorithm Flowchart
+Reverse String — Swap Inward
+L = 0, R = n − 1
+L < R ?
+Yes
+No
+End
+swap s[L] ↔ s[R]
+L++ , R−−
+Final · 
+left == right
+ → loop terminates
+o
+0
+l
+1
+L·R
+l
+2
+e
+3
+h
+4
+Final Result: ['o','l','l','e','h']
+Example 1.2
+Two Sum II — Input Array Is Sorted
+LeetCode 167
+Find two numbers in a 1-indexed sorted array that sum to a target. Return their 1-indexed positions.
+ Brute Force · O(N²) time · O(1) space
+def twoSum_brute_force(numbers: list[int], target: int) -> list[int]:
+ n = len(numbers)
+ for i in range(n):
+ for j in range(i + 1, n):
+ if numbers[i] + numbers[j] == target:
+ return [i + 1, j + 1]
+ return []
+ Optimal — Two Pointers · O(N) time · O(1) space
+# Primitive 1: Opposite ends initialization
+left = 0
+right = len(numbers) - 1
+# Primitive 2: Strict bound convergence loop
+while left < right:
+# Primitive 5: Calculate running sum state
+ current_sum = numbers[left] + numbers[right]
+ if current_sum == target:
+ return [left + 1, right + 1]
+ elif current_sum < target:
+ left += 1
+ else:
+ right -= 1
+return []
+ Algorithm Flowchart
+Two Sum II — Meet in the Middle
+L = 0, R = n − 1
+L < R ?
+Yes
+No
+return []
+sum = nums[L] + nums[R]
+sum == target ?
+No
+Yes
+return
+[L+1, R+1]
+sum < target ?
+Yes
+L++
+No
+R−−
+Result for 
+[2,7,11,15]
+, target 9: [1, 2]
+Example 1.3
+Container With Most Water
+LeetCode 11
+Find two heights that form a container storing the maximum amount of water.
+ Brute Force · O(N²) time · O(1) space
+def maxArea_brute_force(height: list[int]) -> int:
+ n = len(height)
+ max_water = 0
+ for i in range(n):
+ for j in range(i + 1, n):
+ width = j - i
+ h = min(height[i], height[j])
+ max_water = max(max_water, width * h)
+ return max_water
+ Optimal — Two Pointers (Greedy) · O(N) time · O(1) space
+def maxArea(height: list[int]) -> int:
+# Primitive 1: Opposite ends setup
+ left = 0
+ right = len(height) - 1
+# Primitive 5: Maximum tracking state initialization
+ max_water = 0
+# Primitive 2: Convergence loop
+ while left < right:
+# Primitive 5: Current capacity state
+ width = right - left
+ min_h = min(height[left], height[right])
+ current_water = width * min_h
+ max_water = max(max_water, current_water)
+# Primitive 2: Greedy — move the shorter line inward
+ if height[left] < height[right]:
+ left += 1
+ else:
+ right -= 1
+ return max_water
+ Algorithm Flowchart
+Container With Most Water — Greedy Inward
+L = 0, R = n − 1, max = 0
+L < R ?
+Yes
+No
+return max
+area = (R − L) · min(h[L], h[R])
+max = max(max, area)
+h[L] < h[R] ?
+Yes
+L++
+No
+R−−
+Result for 
+[1,8,6,2,5,4,8,3,7]
+: 49
+Example 1.4
+3Sum
+LeetCode 15
+Return all unique triplets that sum to zero.
+ Brute Force · O(N³) time · O(N) space
+def threeSum_brute_force(nums: list[int]) -> list[list[int]]:
+ res = set()
+ n = len(nums)
+ for i in range(n):
+ for j in range(i + 1, n):
+ for k in range(j + 1, n):
+ if nums[i] + nums[j] + nums[k] == 0:
+ res.add(tuple(sorted([nums[i], nums[j], nums[k]])))
+ return [list(t) for t in res]
+ Optimal — Sort + Converging · O(N²) time · O(1) extra space
+def threeSum(nums: list[int]) -> list[list[int]]:
+ nums.sort()
+ res = []
+ n = len(nums)
+ for i in range(n - 2):
+# Primitive 6: Skip duplicate anchor values
+ if i > 0 and nums[i] == nums[i - 1]:
+ continue
+# Primitive 1: Initialize converging pointers
+ left = i + 1
+ right = n - 1
+# Primitive 2: Strict bound convergence loop
+ while left < right:
+# Primitive 5: Calculate 3-sum state
+ total = nums[i] + nums[left] + nums[right]
+ if total == 0:
+ res.append([nums[i], nums[left], nums[right]])
+ left += 1
+ right -= 1
+# Primitive 6: Guarded skipping of inner duplicates
+ while left < right and nums[left] == nums[left - 1]:
+ left += 1
+ while left < right and nums[right] == nums[right + 1]:
+ right -= 1
+ elif total < 0:
+ left += 1
+ else:
+ right -= 1
+ return res
+ Algorithm Flowchart
+3Sum — Anchor + Converge + Skip Duplicates
+sort(nums); i = 0
+i < n − 2 ?
+No
+return res
+Yes
+i > 0 and
+nums[i] == nums[i−1] ?
+Yes
+skip i
+(continue)
+No
+L = i + 1, R = n − 1
+L < R ?
+No
+i++
+Yes
+total = nums[i] + nums[L] + nums[R]
+total == 0 → record, skip dups, L++, R−−
+total < 0 → L++
+total > 0 → R−−
+inner loop: L, R converge · outer loop: i advances
+Result for 
+[-1,0,1,2,-1,-4]
+: [[−1,−1,2], [−1,0,1]]
+▶
+ Same Direction Read & Write
+Pattern 2
+A reader scanning ahead, a writer building behind
+ Both pointers start at the beginning. The read pointer scans every element; the write pointer builds the valid result in-place.
+Example 2.1
+Remove Element
+LeetCode 27
+Remove all occurrences of 
+val
+ in-place; return the number of remaining elements.
+ Brute Force · O(N) time · O(N) space
+def removeElement_brute_force(nums: list[int], val: int) -> int:
+ temp = [x for x in nums if x != val]
+ for i in range(len(temp)):
+ nums[i] = temp[i]
+ return len(temp)
+ Optimal — Read & Write · O(N) time · O(1) space
+def removeElement(nums: list[int], val: int) -> int:
+# Primitive 1: Write pointer initialization
+ write = 0
+# Primitive 2 & 4: Read pointer scans every index
+ for read in range(len(nums)):
+ if nums[read] != val:
+# Primitive 4: In-place overwrite at write pointer
+ nums[write] = nums[read]
+# Primitive 2 & 4: Advance write pointer
+ write += 1
+ return write
+ Algorithm Flowchart
+Remove Element — Keep Non-Matching
+write = 0, read = 0
+read < n ?
+Yes
+No
+return write
+nums[read] != val ?
+Yes
+No
+skip
+nums[write] = nums[read]
+write++
+Result for 
+[3,2,2,3]
+, val=3: 2 → [2, 2]
+Example 2.2
+Remove Duplicates from Sorted Array
+LeetCode 26
+Remove duplicates in-place; return unique count.
+ Brute Force · O(N log N) time · O(N) space
+def removeDuplicates_brute_force(nums: list[int]) -> int:
+ unique = sorted(set(nums))
+ for i in range(len(unique)):
+ nums[i] = unique[i]
+ return len(unique)
+ Optimal — Slow / Fast · O(N) time · O(1) space
+def removeDuplicates(nums: list[int]) -> int:
+ if not nums: 
+# Primitive 1: Safety bounds guard
+ return 0
+ slow = 0
+ for fast in range(1, len(nums)):
+ if nums[fast] != nums[slow]:
+ slow += 1
+ nums[slow] = nums[fast]
+ return slow + 1
+ Algorithm Flowchart
+Remove Duplicates — Compare Ahead
+slow = 0, fast = 1
+fast < n ?
+Yes
+No
+return
+slow + 1
+nums[fast] ≠ nums[slow] ?
+Yes
+No
+skip
+slow++
+nums[slow] = nums[fast]
+Result for 
+[0,0,1,1,1,2]
+: 3 → [0, 1, 2]
+Example 2.3
+Move Zeroes
+LeetCode 283
+Move all zeroes to the end while keeping relative order of non-zeros.
+ Brute Force · O(N) time · O(N) space
+def moveZeroes_brute_force(nums: list[int]) -> None:
+ temp = [x for x in nums if x != 0]
+ for i in range(len(temp)):
+ nums[i] = temp[i]
+ for i in range(len(temp), len(nums)):
+ nums[i] = 0
+ Optimal — Read & Write with Swap · O(N) time · O(1) space
+def moveZeroes(nums: list[int]) -> None:
+# Primitive 1: Write pointer setup
+ write = 0
+ for read in range(len(nums)):
+ if nums[read] != 0:
+# Primitive 3: Swap non-zero to write slot
+ nums[write], nums[read] = nums[read], nums[write]
+ write += 1
+ Algorithm Flowchart
+Move Zeroes — Swap Non-Zero Forward
+write = 0, read = 0
+read < n ?
+Yes
+No
+End
+nums[read] != 0 ?
+Yes
+No
+skip
+swap nums[write] ↔ nums[read]
+write++
+Result for 
+[0,1,0,3,12]
+: [1, 3, 12, 0, 0]
+▶
+ Backwards Write
+Pattern 3
+Fill the output from the end — the largest values come from the extremes
+ Converging pointers on the 
+input
+ combine with a backwards-moving write pointer on the 
+output
+. Works when the elements to place are at the boundaries.
+Example 3.1
+Squares of a Sorted Array
+LeetCode 977
+Given a sorted array (may contain negatives), return the squares sorted in non-decreasing order.
+ Brute Force · O(N log N) time · O(N) space
+def sortedSquares_brute_force(nums: list[int]) -> list[int]:
+ return sorted([x * x for x in nums])
+ Optimal — Converging + Backwards Write · O(N) time · O(N) space
+def sortedSquares(nums: list[int]) -> list[int]:
+ n = len(nums)
+ res = [0] * n
+# Primitive 1: Opposite pointers AND backwards write pointer
+ left = 0
+ right = n - 1
+ write = n - 1
+# Primitive 2: Inclusive bound convergence loop
+ while left <= right:
+# Primitive 5: Compare square magnitudes at both ends
+ if abs(nums[left]) > abs(nums[right]):
+# Primitive 4: Write larger square to rightmost slot
+ res[write] = nums[left] ** 2
+ left += 1
+ else:
+ res[write] = nums[right] ** 2
+ right -= 1
+ write -= 1
+ return res
+ Algorithm Flowchart
+Squares of a Sorted Array — Fill from the Right
+L = 0, R = n−1, W = n−1
+L ≤ R ?
+Yes
+No
+return res
+|nums[L]| > |nums[R]| ?
+Yes
+res[W] = nums[L]²
+L++
+No
+res[W] = nums[R]²
+R−−
+W−−
+Result for 
+[-4,-1,0,3,10]
+: [0, 1, 9, 16, 100]
+Example 3.2
+Merge Sorted Array
+LeetCode 88
+Merge 
+nums2
+ into 
+nums1
+ in-place, in sorted order. 
+nums1
+ has 
+m + n
+ slots, first 
+m
+ filled, last 
+n
+ empty.
+ Brute Force · O((M+N) log(M+N)) time · O(M+N) space
+def merge_brute_force(nums1: list[int], m: int, nums2: list[int], n: int) -> None:
+ combined = nums1[:m] + nums2
+ combined.sort()
+ for i in range(m + n):
+ nums1[i] = combined[i]
+ Optimal — Backwards Write · O(M+N) time · O(1) space
+def merge(nums1: list[int], m: int, nums2: list[int], n: int) -> None:
+# Primitive 1: Pointers at END of each valid region + write slot
+ i = m - 1
+ j = n - 1
+ write = m + n - 1
+# Primitive 2: Strict bound — stop when either input exhausted
+ while i >= 0 and j >= 0:
+# Primitive 5: Compare largest remaining elements
+ if nums1[i] > nums2[j]:
+ nums1[write] = nums1[i]
+ i -= 1
+ else:
+ nums1[write] = nums2[j]
+ j -= 1
+ write -= 1
+# Primitive 4: Drain any remaining nums2
+ while j >= 0:
+ nums1[write] = nums2[j]
+ j -= 1
+ write -= 1
+ Algorithm Flowchart
+Merge Sorted Array — Fill nums1 from the Back
+i = m−1, j = n−1, W = m+n−1
+i ≥ 0 AND j ≥ 0 ?
+Yes
+nums1[i] > nums2[j] ?
+Yes
+nums1[W] = nums1[i]
+i−−
+No
+nums1[W] = nums2[j]
+j−−
+W−−
+No
+j ≥ 0 ?
+Yes
+nums1[W] = nums2[j]
+j−−, W−− · repeat
+No
+Done
+If j < 0, the remaining nums1 elements are already in their final place.
+Result for 
+nums1=[1,2,3,0,0,0], nums2=[2,5,6]
+: [1, 2, 2, 3, 5, 6]
+▶
+ Cross-Cutting Technique
+Guarded Skipping
+Not a pattern — a rule that lives inside other patterns
+ Guarded skipping is the safety detail inside a converging loop. It appears in Pattern 1 (3Sum) and in any pattern that must skip invalid or duplicate elements (Valid Palindrome).
+🔒 The Rule
+while left < right and skip_condition:
+Every inner skipping loop 
+must
+ repeat the outer bound test. Without 
+left < right
+, the inner loop can run past valid indices and raise 
+IndexError
+, or silently loop forever when the outer pointers have already met.
+Example G.1
+3Sum — Duplicate Skipping
+LeetCode 15 · callback
+The guard inside Pattern 1's 3Sum.
+# Inside the converging while loop, after recording a triplet
+while left < right and nums[left] == nums[left - 1]:
+ left += 1
+while left < right and nums[right] == nums[right + 1]:
+ right -= 1
+Example G.2
+Valid Palindrome
+LeetCode 125
+Return true if the string is a palindrome after ignoring non-alphanumeric characters and case.
+ Brute Force · O(N) time · O(N) space
+def isPalindrome_brute_force(s: str) -> bool:
+ cleaned = [c.lower() for c in s if c.isalnum()]
+ return cleaned == cleaned[::-1]
+ Optimal — Converging + Guarded Skipping · O(N) time · O(1) space
+def isPalindrome(s: str) -> bool:
+# Primitive 1: Opposite ends initialization
+ left = 0
+ right = len(s) - 1
+# Primitive 2: Strict bound convergence loop
+ while left < right:
+# Primitive 6: Guarded skip — non-alnum from left
+ while left < right and not s[left].isalnum():
+ left += 1
+# Primitive 6: Guarded skip — non-alnum from right
+ while left < right and not s[right].isalnum():
+ right -= 1
+# Primitive 5: Compare case-insensitive
+ if s[left].lower() != s[right].lower():
+ return False
+ left += 1
+ right -= 1
+ return True
+ Algorithm Flowchart
+Valid Palindrome — Skip, Compare, Converge
+L = 0, R = n − 1
+L < R ?
+Yes
+No
+return True
+while L < R and not s[L].isalnum(): L += 1
+while L < R and not s[R].isalnum(): R −= 1
+s[L].lower() ==
+s[R].lower() ?
+Yes
+No
+return False
+L++ , R−−
+Result: true
+▶
+ Foundations · The Seventh Primitive
+Primitive 7
+Introduced here because Sliding Window depends on it
+ The first 6 primitives cover per-element mechanics. Sliding Window needs a 
+state that spans a contiguous range
+ — a sum, a set, a frequency map — updated symmetrically as the range changes.
+07
+Window State Expand / Shrink
+O(N) aggregate · O(1)–O(k) space
+Symmetric Pair:
+ Every element added on expand must be removable by the same rule on shrink.
+Expand (driven by 
+right
+):
+window_sum += nums[right]
+ or 
+seen.add(nums[right])
+.
+Shrink (driven by 
+left
+):
+window_sum -= nums[left]
+ or 
+seen.remove(nums[left])
+, then 
+left += 1
+.
+The Invariant:
+ At the top of each outer iteration, the window state reflects exactly 
+nums[left..right]
+.
+Guard the Shrink:
+while left <= right and invalid_condition:
+ — same discipline as Primitive 6.
+Fixed vs Variable:
+ Fixed-size shrinks exactly once per iteration; variable-size shrinks as many times as needed.
+▶
+ Sliding Window (Variable & Fixed Size)
+Pattern 4
+Right pointer expands, left pointer shrinks
+Heads-up:
+ the 
+set
+, 
+dict
+ and 
+Counter
+ used by these window examples are plain tools here. Hash tables are formalized in Volume 3 (Hash Lookup).
+Example 4.1
+Maximum Average Subarray I
+LeetCode 643 · Fixed Window
+Find the contiguous subarray of length exactly 
+k
+ with the maximum average.
+ Brute Force · O(N·k) time · O(1) space
+def findMaxAverage_brute_force(nums: list[int], k: int) -> float:
+ n = len(nums)
+ best = float('-inf')
+ for i in range(n - k + 1):
+ window_sum = 0
+ for j in range(i, i + k):
+ window_sum += nums[j]
+ best = max(best, window_sum / k)
+ return best
+ Optimal — Fixed-Size Sliding Window · O(N) time · O(1) space
+def findMaxAverage(nums: list[int], k: int) -> float:
+ left = 0
+ window_sum = 0
+ max_sum = float('-inf')
+ for right in range(len(nums)):
+# Primitive 7: Expand
+ window_sum += nums[right]
+# Primitive 7: Fixed-size shrink when window reaches size k
+ if right - left + 1 == k:
+ max_sum = max(max_sum, window_sum)
+ window_sum -= nums[left]
+ left += 1
+ return max_sum / k
+ Algorithm Flowchart
+Maximum Average Subarray — Fixed Window
+left = 0, sum = 0, max = −∞
+for right in range(n):
+expand the window
+done
+return
+max / k
+sum += nums[right]
+window size
+== k ?
+Yes
+No
+max = max(max, sum)
+sum −= nums[left]
+left++
+Result for 
+[1,12,-5,-6,50,3], k=4
+: 12.75
+Example 4.2
+Longest Substring Without Repeating Characters
+LeetCode 3 · Variable Window
+Find the length of the longest substring without repeating characters.
+ Brute Force · O(N³) time · O(k) space
+def lengthOfLongestSubstring_brute_force(s: str) -> int:
+ n = len(s)
+ best = 0
+ for i in range(n):
+ for j in range(i, n):
+ sub = s[i:j+1]
+ if len(set(sub)) == len(sub):
+ best = max(best, len(sub))
+ return best
+ Optimal — Variable Window + Set · O(N) time · O(k) space
+def lengthOfLongestSubstring(s: str) -> int:
+ left = 0
+ seen = set()
+ max_len = 0
+ for right in range(len(s)):
+# Primitive 7: Shrink while duplicate exists
+ while s[right] in seen:
+ seen.remove(s[left])
+ left += 1
+# Primitive 7: Expand
+ seen.add(s[right])
+# Primitive 5: Running maximum
+ max_len = max(max_len, right - left + 1)
+ return max_len
+ Algorithm Flowchart
+Longest Substring — Expand, Shrink on Duplicate
+left = 0, seen = {}, max = 0
+for right in range(n):
+expand the window
+done
+return max
+s[right] in seen ?
+No
+Yes
+seen.remove(s[left])
+left++
+seen.add(s[right])
+max = max(max, right−left+1)
+Result for 
+"abcabcbb"
+: 3 → "abc"
+Example 4.3
+Minimum Size Subarray Sum
+LeetCode 209 · Variable Window
+Return the minimal length of a contiguous subarray whose sum ≥ target. Return 0 if none exists.
+ Brute Force · O(N²) time · O(1) space
+def minSubArrayLen_brute_force(target: int, nums: list[int]) -> int:
+ n = len(nums)
+ best = float('inf')
+ for i in range(n):
+ running = 0
+ for j in range(i, n):
+ running += nums[j]
+ if running >= target:
+ best = min(best, j - i + 1)
+ break
+ return best if best != float('inf') else 0
+ Optimal — Variable Window (Sum) · O(N) time · O(1) space
+def minSubArrayLen(target: int, nums: list[int]) -> int:
+ left = 0
+ window_sum = 0
+ min_len = float('inf')
+ for right in range(len(nums)):
+# Primitive 7: Expand
+ window_sum += nums[right]
+# Primitive 7: Shrink while window is valid
+ while window_sum >= target:
+ min_len = min(min_len, right - left + 1)
+ window_sum -= nums[left]
+ left += 1
+ return min_len if min_len != float('inf') else 0
+ Algorithm Flowchart
+Minimum Size Subarray — Expand, Shrink on Valid
+left = 0, sum = 0, min = ∞
+for right in range(n):
+expand the window
+done
+return min
+(0 if ∞)
+sum += nums[right]
+sum ≥ target ?
+Yes
+record min length
+sum −= nums[left]
+left++
+No
+Result for 
+[2,3,1,2,4,3]
+, target 7: 2 → [4, 3]
+Example 4.4
+Find All Anagrams in a String
+LeetCode 438 · Fixed Window + Freq Map
+Return all start indices of 
+p
+'s anagrams in 
+s
+.
+ Brute Force · O(N · k log k) time · O(k) space
+def findAnagrams_brute_force(s: str, p: str) -> list[int]:
+ n, k = len(s), len(p)
+ target = sorted(p)
+ res = []
+ for i in range(n - k + 1):
+ if sorted(s[i:i+k]) == target:
+ res.append(i)
+ return res
+ Optimal — Fixed Window + Frequency Map · O(N) time · O(1) space (26 letters)
+from collections import Counter
+def findAnagrams(s: str, p: str) -> list[int]:
+ left = 0
+ k = len(p)
+ p_count = Counter(p)
+ window_count = Counter()
+ res = []
+ for right in range(len(s)):
+# Primitive 7: Expand — add char to window map
+ window_count[s[right]] += 1
+# Primitive 7: Fixed-size — shrink once window > k
+ if right - left + 1 > k:
+ window_count[s[left]] -= 1
+ if window_count[s[left]] == 0:
+ del window_count[s[left]]
+ left += 1
+# Primitive 5: Compare window state to reference
+ if window_count == p_count:
+ res.append(left)
+ return res
+ Algorithm Flowchart
+Find All Anagrams — Fixed Window + Frequency Map
+p_count = Counter(p); window = {}
+for right in range(n):
+expand the window
+done
+return res
+window[s[right]] += 1
+window size
+> k ?
+No
+Yes
+window[s[left]] −= 1
+del if zero; left++
+window == p_count ?
+Yes
+res.append(left)
+No
+Result for 
+s="cbaebabacd", p="abc"
+: [0, 6]
+▶
+ Two-Array Merge
+Pattern 5
+One pointer per input — advance whichever is behind
+ Unlike converging (which uses two pointers on 
+one
+ array), two-array merge uses 
+one pointer on each of two inputs
+. The two pointers never meet — they walk independently, and the algorithm ends when either input is exhausted. This is the pattern behind every merge operation, intersection, and subsequence check.
+Example 5.1
+Is Subsequence
+LeetCode 392
+Given strings 
+s
+ and 
+t
+, return true if 
+s
+ is a subsequence of 
+t
+ (i.e., 
+s
+ can be formed by deleting characters from 
+t
+ without reordering).
+ Brute Force · O(2^N) time · O(2^N) space
+Generate all subsequences of 
+t
+, check if 
+s
+ is one of them. 
+Exponential — impractical.
+def isSubsequence_brute_force(s: str, t: str) -> bool:
+ def all_subsequences(x):
+ if not x:
+ return {""}
+ rest = all_subsequences(x[1:])
+ return rest | {x[0] + sub for sub in rest}
+ return s in all_subsequences(t)
+ Optimal — Two-Array Merge · O(N) time · O(1) space
+def isSubsequence(s: str, t: str) -> bool:
+# Primitive 1: One pointer per input, both at the start
+ i = 0
+ j = 0
+# Primitive 2: Loop until either input is exhausted
+ while i < len(s) and j < len(t):
+# Primitive 5: Compare the current pair of characters
+ if s[i] == t[j]:
+# Primitive 2: Match — advance both pointers
+ i += 1
+# Primitive 2: Always advance the t pointer
+ j += 1
+# s is a subsequence iff we consumed all of s
+ return i == len(s)
+ Algorithm Flowchart
+Is Subsequence — Advance Both on Match
+i = 0, j = 0
+i < len(s)
+AND j < len(t) ?
+Yes
+No
+return
+i == len(s)
+s[i] == t[j] ?
+No
+Yes
+i++
+j++
+Step 3 · 
+s = "ace"
+, 
+t = "abcde"
+ · i and j both point at 'c' → match, advance both
+a
+0
+i
+c
+1
+e
+2
+a
+0
+b
+1
+j
+c
+2
+d
+3
+e
+4
+Result for 
+s="ace", t="abcde"
+: true
+Example 5.2
+Intersection of Two Arrays II
+LeetCode 350
+Given two integer arrays, return their intersection as a multiset — each element appears as many times as it appears in both inputs.
+ Brute Force · O(N·M) time · O(M) space
+For each element of 
+nums1
+, linear-scan 
+nums2
+. 
+Quadratic in the worst case.
+def intersect_brute_force(nums1: list[int], nums2: list[int]) -> list[int]:
+ used = [False] * len(nums2)
+ res = []
+ for x in nums1:
+ for j, y in enumerate(nums2):
+ if not used[j] and x == y:
+ used[j] = True
+ res.append(x)
+ break
+ return res
+ Optimal — Sort + Two-Array Merge · O(M log M + N log N) time · O(1) extra space*
+def intersect(nums1: list[int], nums2: list[int]) -> list[int]:
+# Pre-requisite: sort both inputs
+ nums1.sort()
+ nums2.sort()
+# Primitive 1: One pointer per input, both at the start
+ i = 0
+ j = 0
+ res = []
+# Primitive 2: Loop until either input is exhausted
+ while i < len(nums1) and j < len(nums2):
+# Primitive 5: Compare the current pair
+ if nums1[i] == nums2[j]:
+ res.append(nums1[i])
+# Primitive 2: Match — advance BOTH pointers
+ i += 1
+ j += 1
+ elif nums1[i] < nums2[j]:
+# Primitive 2: nums1 is behind — catch it up
+ i += 1
+ else:
+# Primitive 2: nums2 is behind — catch it up
+ j += 1
+ return res
+* Sorting happens in place on the inputs (this mutates the caller's arrays) and Python's sort may use temporary memory; the extra space counted here excludes the sort and the output list.
+ Algorithm Flowchart
+Intersection of Two Arrays — Advance the Smaller
+sort both; i = 0, j = 0
+i < len1
+AND j < len2 ?
+Yes
+No
+return res
+nums1[i] == nums2[j] ?
+No
+Yes
+record
+i++, j++
+nums1[i] < nums2[j] ?
+No
+Yes
+i++
+j++
+Step 2 · 
+nums1 = [1,2,2,1]
+ → sorted 
+[1,1,2,2]
+ · 
+nums2 = [2,2]
+ · match at 2
+1
+0
+1
+1
+i
+2
+2
+2
+3
+j
+2
+0
+2
+1
+Result for 
+[1,2,2,1]
+, 
+[2,2]
+: [2, 2]
+▶
+ Foundations · The Eighth Primitive
+Primitive 8
+Introduced here because Prefix Sum depends on it
+ Every primitive so far works on 
+the current element
+. Prefix Sum needs something different: a 
+precomputed array
+ whose values are cumulative sums, so that range queries answer in O(1) instead of O(k). This is the first primitive that builds a data structure, not a pointer.
+08
+Cumulative State Construction (Prefix Sum / Product)
+O(N) build · O(1) query · O(N) space
+Prefix Array Build:
+prefix[i] = prefix[i-1] + nums[i-1]
+, with a leading 
+prefix[0] = 0
+. The extra leading slot eliminates all "what if left == 0" edge cases.
+Range Sum Query:
+range_sum(l, r) = prefix[r+1] - prefix[l]
+ — O(1) regardless of window size.
+Prefix Products:
+ Same shape with multiplicative identity 
+1
+ instead of 
+0
+. Breaks if the array contains a 0 (you cannot divide by it), which is why Example 6.3 avoids division entirely. Often paired with a mirrored 
+suffix
+ array to answer "everything except index i" queries.
+Prefix + Suffix Pairs:
+ Build both arrays in one pass each; the answer at index 
+i
+ combines 
+prefix[i]
+ and 
+suffix[i+1]
+.
+The Invariant:
+prefix[i]
+ equals the sum (or product) of 
+nums[0..i-1]
+. Never includes index 
+i
+ itself.
+What it does NOT do:
+ Prefix sum only works when the operation is 
+invertible
+ (sum, XOR; product only while no element is 0). It does not handle min/max queries — those need a monotonic deque (Volume 3) or a sparse table / segment tree (Volume 4). If the array changes between queries, use a Fenwick tree (Volume 4).
+▶
+ Prefix Sum
+Pattern 6
+Trade O(N) build for O(1) range queries
+Example 6.1
+Range Sum Query — Immutable
+LeetCode 303
+Design a class that answers many 
+sumRange(left, right)
+ queries on a static array. Each query must be O(1).
+ Brute Force · O(N) per query · O(1) space
+Recompute the sum for every query by iterating 
+nums[left..right]
+. 
+Too slow when queries are frequent.
+class NumArray_brute_force:
+ def __init__(self, nums: list[int]):
+ self.nums = nums
+ def sumRange(self, left: int, right: int) -> int:
+ return sum(self.nums[left:right+1]) 
+# O(N) per query
+ Optimal — Precomputed Prefix Sum · O(N) build · O(1) per query
+class NumArray:
+ def __init__(self, nums: list[int]):
+# Primitive 8: Build prefix array with a leading 0
+ self.prefix = [0] * (len(nums) + 1)
+ for i in range(len(nums)):
+# Primitive 8: Cumulative state construction
+ self.prefix[i + 1] = self.prefix[i] + nums[i]
+ def sumRange(self, left: int, right: int) -> int:
+# Primitive 8: O(1) range query via prefix difference
+ return self.prefix[right + 1] - self.prefix[left]
+ Algorithm Flowchart
+Range Sum — Build Once, Query in O(1)
+__init__: build prefix
+prefix[0] = 0
+prefix[i+1] = prefix[i] + nums[i]
+sumRange(l, r) — O(1)
+prefix[r+1] − prefix[l]
+return range sum
+Prefix array for 
+nums = [3, 1, 4, 1, 5]
+ · query 
+sumRange(1, 3) = prefix[4] − prefix[1] = 9 − 3 = 6
+p
+0
+0
+3
+1
+4
+2
+8
+3
+9
+4
+14
+5
+Query 
+sumRange(1, 3)
+ on 
+[3,1,4,1,5]
+: 6
+Example 6.2
+Find Pivot Index
+LeetCode 724
+Return the leftmost index where the sum of elements strictly to the left equals the sum strictly to the right. Return −1 if none.
+ Brute Force · O(N²) time · O(1) space
+For each index, recompute left and right sums. 
+Quadratic on large inputs.
+def pivotIndex_brute_force(nums: list[int]) -> int:
+ for i in range(len(nums)):
+ if sum(nums[:i]) == sum(nums[i+1:]):
+ return i
+ return -1
+ Optimal — Total Sum + Running Left · O(N) time · O(1) space
+def pivotIndex(nums: list[int]) -> int:
+# Primitive 8: Total sum — the prefix of the whole array, computed once
+ total = sum(nums)
+# Primitive 5: Running left-sum state
+ left_sum = 0
+# Primitive 2: Single forward pass
+ for i in range(len(nums)):
+# Primitive 8: Right sum = total − left_sum − nums[i]
+ if left_sum == total - left_sum - nums[i]:
+ return i
+# Primitive 5: Extend the running left-sum state
+ left_sum += nums[i]
+ return -1
+ Algorithm Flowchart
+Find Pivot Index — Running Left vs. Implied Right
+total = sum(nums); left = 0
+i < n ?
+Yes
+No
+return −1
+left == total −
+left − nums[i] ?
+No
+Yes
+return i
+left += nums[i]
+Result for 
+[1,7,3,6,5,6]
+: 3
+Example 6.3
+Product of Array Except Self
+LeetCode 238
+Return an array 
+output
+ where 
+output[i]
+ is the product of all elements of 
+nums
+ except 
+nums[i]
+. Solve in O(N) time and O(1) extra space (output array does not count).
+ Brute Force · O(N²) time · O(1) extra space
+For each 
+i
+, compute the product of all other elements. 
+Divisions are banned by the problem constraints.
+def productExceptSelf_brute_force(nums: list[int]) -> list[int]:
+ n = len(nums)
+ res = [1] * n
+ for i in range(n):
+ for j in range(n):
+ if i != j:
+ res[i] *= nums[j]
+ return res
+ Optimal — Prefix × Suffix (in place) · O(N) time · O(1) extra space
+def productExceptSelf(nums: list[int]) -> list[int]:
+ n = len(nums)
+ res = [1] * n
+# Primitive 8: Prefix pass — res[i] = product of nums[0..i-1]
+ prefix = 1
+ for i in range(n):
+ res[i] = prefix
+ prefix *= nums[i]
+# Primitive 8: Suffix pass — multiply in product of nums[i+1..n-1]
+ suffix = 1
+ for i in range(n - 1, -1, -1):
+ res[i] *= suffix
+ suffix *= nums[i]
+ return res
+ Algorithm Flowchart
+Product Except Self — Prefix Pass, Then Suffix Pass
+prefix = 1; res = [1]*n
+Forward pass (i →)
+res[i] = prefix; prefix *= nums[i]
+Backward pass (← i)
+res[i] *= suffix; suffix *= nums[i]
+return res
+After both passes · 
+nums = [1,2,3,4]
+ → 
+res = [24,12,8,6]
+p→
+1
+0
+2
+1
+←s
+3
+2
+4
+3
+Result for 
+[1,2,3,4]
+: [24, 12, 8, 6]
+▶
+ Kadane / Running Extremes
+Pattern 7
+No pointers — just running state
+ Kadane shows that a real algorithm can be built with 
+no pointers at all
+. It needs only Primitive 5 (extreme values and running state) plus a plain forward loop (Primitive 2). The insight is that for many problems, the "best ending at 
+i
+" can be computed from the "best ending at 
+i-1
+" with a single comparison. The whole algorithm is a state update.
+Example 7.1
+Maximum Subarray
+LeetCode 53
+Find the contiguous subarray with the largest sum. Return that sum.
+ Brute Force · O(N²) time · O(1) space
+Try every starting index and extend. 
+Quadratic on large inputs.
+def maxSubArray_brute_force(nums: list[int]) -> int:
+ n = len(nums)
+ best = float('-inf')
+ for i in range(n):
+ running = 0
+ for j in range(i, n):
+ running += nums[j]
+ best = max(best, running)
+ return best
+ Optimal — Kadane's · O(N) time · O(1) space
+def maxSubArray(nums: list[int]) -> int:
+# Primitive 5: Two running states — best ending here, best overall
+# LeetCode guarantees len(nums) >= 1; in your own code add the Primitive 1 guard first
+ best_ending_here = nums[0]
+ best_overall = nums[0]
+# Primitive 2: Single forward pass (loop only, no pointer)
+ for i in range(1, len(nums)):
+# Primitive 5: Extend the previous run, or start fresh at nums[i]
+ best_ending_here = max(nums[i], best_ending_here + nums[i])
+# Primitive 5: Update the global best
+ best_overall = max(best_overall, best_ending_here)
+ return best_overall
+ Algorithm Flowchart
+Maximum Subarray — Extend or Restart
+here = nums[0]; best = nums[0]
+i < n ?
+Yes
+No
+return best
+here = max(nums[i], here + nums[i])
+best = max(best, here)
+At i = 3 · 
+nums = [-2,1,-3,4,-1,2,1,-5,4]
+ · here = 4, best = 4
+−2
+0
+1
+1
+−3
+2
+i
+4
+3
+−1
+4
+2
+5
+1
+6
+−5
+7
+4
+8
+Result for 
+[-2,1,-3,4,-1,2,1,-5,4]
+: 6 → [4, −1, 2, 1]
+Example 7.2
+Maximum Product Subarray
+LeetCode 152
+Find the contiguous subarray with the largest product.
+ Brute Force · O(N²) time · O(1) space
+Try every subarray and take the product. 
+Quadratic.
+def maxProduct_brute_force(nums: list[int]) -> int:
+ n = len(nums)
+ best = float('-inf')
+ for i in range(n):
+ running = 1
+ for j in range(i, n):
+ running *= nums[j]
+ best = max(best, running)
+ return best
+ Optimal — Kadane with Min/Max Pair · O(N) time · O(1) space
+def maxProduct(nums: list[int]) -> int:
+# Primitive 5: Track BOTH running max and running min (negatives flip signs)
+# LeetCode guarantees len(nums) >= 1; in your own code add the Primitive 1 guard first
+ cur_max = nums[0]
+ cur_min = nums[0]
+ best = nums[0]
+ for i in range(1, len(nums)):
+# Primitive 5: Compute both candidates before overwriting either
+ candidates = (nums[i], cur_max * nums[i], cur_min * nums[i])
+ cur_max = max(candidates)
+ cur_min = min(candidates)
+# Primitive 5: Update global best using the running max
+ best = max(best, cur_max)
+ return best
+ Algorithm Flowchart
+Maximum Product Subarray — Track Min and Max
+max = nums[0], min = nums[0], best = nums[0]
+i < n ?
+Yes
+No
+return best
+cands = (nums[i], max*nums[i], min*nums[i])
+negatives swap max and min — evaluate both first
+max = max(cands); min = min(cands)
+best = max(best, max)
+Result for 
+[2,3,-2,4]
+: 6 → [2, 3]
+▶
+ Extensions
+Filling the Gaps
+Variants and capstones that reuse Patterns 1–7
+ Eight more problems that interviews love. Each one is a 
+variation
+ of a pattern you already know: three pointers instead of two, pointers moving 
+outward
+, a window that counts instead of tracks, or a prefix sum that needs a hash map. Same primitives, one new twist each.
+Example X.1
+Sort Colors (Dutch National Flag)
+LeetCode 75
+Sort an array containing only 
+0
+, 
+1
+ and 
+2
+in place
+ in a single pass, without calling 
+sort
+.
+ Brute Force — Count, Then Overwrite · O(N) time · O(1) space (two passes)
+def sortColors_two_pass(nums: list[int]) -> None:
+# Count each color, then overwrite the array in order
+ counts = [0, 0, 0]
+ for x in nums:
+ counts[x] += 1
+ write = 0
+ for color in range(3):
+ for _ in range(counts[color]):
+ nums[write] = color
+ write += 1
+ Optimal — Three Pointers, One Pass · O(N) time · O(1) space
+def sortColors(nums: list[int]) -> None:
+# Primitive 1: low = next slot for 0s, high = next slot for 2s, mid = scanner
+ low, mid, high = 0, 0, len(nums) - 1
+# Primitive 2: INCLUSIVE bound - nums[mid] == nums[high] is still unchecked
+ while mid <= high:
+ if nums[mid] == 0:
+# Primitive 3: swap a 0 into the front zone
+ nums[low], nums[mid] = nums[mid], nums[low]
+ low += 1
+ mid += 1 
+# safe: whatever came from low is already a 1
+ elif nums[mid] == 1:
+ mid += 1
+ else:
+# Primitive 3: swap a 2 into the back zone
+ nums[mid], nums[high] = nums[high], nums[mid]
+ high -= 1 
+# do NOT advance mid: the swapped-in value is unchecked
+Invariant:
+[0, low)
+ are 0s · 
+[low, mid)
+ are 1s · 
+[mid, high]
+ is still unknown · 
+(high, n)
+ are 2s. This extends Pattern 2: the write position is split into 
+two
+ zones.
+ Algorithm Flowchart
+Sort Colors — Dutch National Flag
+low = 0, mid = 0, high = n − 1
+mid ≤ high ?
+Yes
+No
+End
+nums[mid] == 0 ?
+No
+Yes
+swap low ↔ mid
+low++, mid++
+nums[mid] == 1 ?
+No
+Yes
+mid++
+swap mid ↔ high
+high−−
+After swapping with high, do NOT advance mid — the new value is unchecked.
+Snapshot after 4 steps · 
+[2,0,2,1,1,0]
+ → 
+low = mid = 2, high = 3
+0
+0
+0
+1
+L·M
+1
+2
+H
+1
+3
+2
+4
+2
+5
+Result for 
+[2,0,2,1,1,0]
+: [0, 0, 1, 1, 2, 2]
+Example X.2
+Longest Palindromic Substring
+LeetCode 5 · 647
+Return the longest palindromic substring of 
+s
+. (LeetCode 647 counts all palindromic substrings using the same idea.)
+ Brute Force — Check Every Substring · O(N³) time · O(N) space
+def longestPalindrome_brute_force(s: str) -> str:
+ best = ""
+ for i in range(len(s)):
+ for j in range(i, len(s)):
+ sub = s[i:j + 1]
+ if sub == sub[::-1] and len(sub) > len(best):
+ best = sub
+ return best
+ Optimal — Expand Around Center · O(N²) time · O(1) space
+def longestPalindrome(s: str) -> str:
+# Primitive 1: remember the best window as two indices (no substring copies)
+ best_l, best_r = 0, 0
+ def expand(l: int, r: int) -> tuple[int, int]:
+# Primitive 2 + Guard: check bounds BEFORE comparing characters
+ while l >= 0 and r < len(s) and s[l] == s[r]:
+# Primitive 2: pointers move OUTWARD (mirror image of Pattern 1)
+ l -= 1
+ r += 1
+ return l + 1, r - 1 
+# last window that was still a palindrome
+ for i in range(len(s)):
+# Odd-length centers sit on i; even-length centers sit between i and i+1
+ for l, r in (expand(i, i), expand(i, i + 1)):
+ if r - l > best_r - best_l:
+ best_l, best_r = l, r
+ return s[best_l:best_r + 1]
+Why 2N − 1 centers:
+ every palindrome mirrors around one character (odd length) or one gap between two characters (even length). 
+Mirror of Pattern 1:
+ Converging shrinks toward a meeting point; this pattern 
+grows away
+ from one. (An O(N) version exists — Manacher's algorithm — but is beyond this series.)
+def countSubstrings(s: str) -> int: 
+# LeetCode 647: same idea, count instead of track best
+ count = 0
+ for center in range(2 * len(s) - 1):
+ l = center // 2
+ r = l + center % 2
+ while l >= 0 and r < len(s) and s[l] == s[r]:
+ count += 1 
+# every successful expansion is one palindrome
+ l -= 1
+ r += 1
+ return count
+ Algorithm Flowchart
+Longest Palindromic Substring — Expand Around Center
+best = (0, 0)
+for i in range(n):
+try center (i, i) and (i, i+1)
+done
+return
+s[best]
+l, r = center
+l ≥ 0 AND r < n
+AND s[l] == s[r] ?
+No
+Yes
+l−−
+r++
+candidate = s[l+1 .. r−1]
+keep it if longer than best
+Result for 
+"babad"
+: "bab" (
+"aba"
+ is equally valid)
+Example X.3
+Trapping Rain Water
+LeetCode 42
+Given 
+n
+ bar heights, compute how much rain water is trapped between the bars. A capstone that combines 
+Pattern 1
+ (converging) with 
+Primitive 8
+ (prefix/suffix maxima).
+ Brute Force — Look Both Ways for Every Bar · O(N²) time · O(N) space
+def trap_brute_force(height: list[int]) -> int:
+ water = 0
+ for i in range(len(height)):
+ left_max = max(height[:i + 1]) 
+# tallest bar at or left of i
+ right_max = max(height[i:]) 
+# tallest bar at or right of i
+ water += min(left_max, right_max) - height[i]
+ return water
+ Middle Step — Prefix / Suffix Max Arrays · O(N) time · O(N) space
+def trap_prefix_suffix(height: list[int]) -> int:
+ n = len(height)
+ if n == 0:
+ return 0
+# Primitive 8: prefix-max and suffix-max arrays
+ left_max = [0] * n
+ right_max = [0] * n
+ left_max[0] = height[0]
+ for i in range(1, n):
+ left_max[i] = max(left_max[i - 1], height[i])
+ right_max[n - 1] = height[n - 1]
+ for i in range(n - 2, -1, -1):
+ right_max[i] = max(right_max[i + 1], height[i])
+ return sum(min(left_max[i], right_max[i]) - height[i] for i in range(n))
+ Optimal — Converging with Running Maxima · O(N) time · O(1) space
+def trap(height: list[int]) -> int:
+# Primitive 1 + Guard: empty input
+ if not height:
+ return 0
+# Primitive 1 + 5: opposite ends, plus a running max on each side
+ left, right = 0, len(height) - 1
+ left_max = right_max = 0
+ water = 0
+# Primitive 2: strict bound - stop when the pointers meet
+ while left < right:
+# The SHORTER side is the bottleneck, so its water level is already known
+ if height[left] < height[right]:
+ left_max = max(left_max, height[left])
+ water += left_max - height[left]
+ left += 1
+ else:
+ right_max = max(right_max, height[right])
+ water += right_max - height[right]
+ right -= 1
+ return water
+Why moving the shorter side is safe:
+ water above a bar = 
+min(tallest to its left, tallest to its right) − height
+. If 
+height[left] < height[right]
+, the right side already guarantees a wall at least that tall, so 
+left_max
+ alone decides the level at 
+left
+.
+ Algorithm Flowchart
+Trapping Rain Water — Shorter Side Moves
+L = 0, R = n − 1, water = 0
+L < R ?
+Yes
+No
+return water
+h[L] < h[R] ?
+Yes
+update left_max
+water += left_max
+− h[L]
+L++
+No
+update right_max
+water += right_max
+− h[R]
+R−−
+Result for 
+[0,1,0,2,1,0,1,3,2,1,2,1]
+: 6
+Example X.4
+Longest Repeating Character Replacement
+LeetCode 424
+You may replace at most 
+k
+ characters of 
+s
+ with any letter. Return the length of the longest substring that can become one repeated letter.
+ Brute Force — Try Every Substring · O(N³) time · O(1) space (26 letters)
+from collections import Counter
+def characterReplacement_brute_force(s: str, k: int) -> int:
+ best = 0
+ for i in range(len(s)):
+ for j in range(i, len(s)):
+ window = s[i:j + 1]
+# replacements needed = window size - count of its most common letter
+ if len(window) - max(Counter(window).values()) <= k:
+ best = max(best, len(window))
+ return best
+ Optimal — Window That Needs ≤ k Edits · O(N) time · O(1) space
+def characterReplacement(s: str, k: int) -> int:
+# Primitive 1 + 5: window start, letter counts, best frequency seen so far
+ counts = {}
+ left = 0
+ max_freq = 0
+ best = 0
+# Primitive 2: right pointer expands the window
+ for right, ch in enumerate(s):
+ counts[ch] = counts.get(ch, 0) + 1
+ max_freq = max(max_freq, counts[ch])
+# Primitive 7: shrink while the replacements needed exceed k
+# replacements needed = window size - most frequent letter
+ while (right - left + 1) - max_freq > k:
+ counts[s[left]] -= 1
+ left += 1
+ best = max(best, right - left + 1)
+ return best
+The stale-max trick:
+max_freq
+ is never lowered when the window shrinks. That is safe, because the answer only grows when a 
+new, higher
+ frequency appears, so an outdated value can never produce a wrongly large window.
+ Algorithm Flowchart
+Longest Repeating Character Replacement — Window Needing ≤ k Edits
+left = 0, counts = {}, max_freq = 0, best = 0
+for right in range(n):
+add s[right]; update max_freq
+done
+return best
+window size
+− max_freq > k ?
+No
+Yes
+counts[s[left]] −= 1
+left++
+best = max(best, right−left+1)
+Result for 
+s = "AABABBA", k = 1
+: 4
+Example X.5
+At Most K Distinct — and the “Exactly K” Trick
+LeetCode 340 / 904 · 992
+(a) Longest substring with 
+at most k
+ distinct characters. (b) Count subarrays with 
+exactly k
+ distinct integers. Part (b) cannot be solved by a single window, but it falls out of part (a).
+ Optimal — Window + Frequency Map · O(N) time · O(k) space
+def longestAtMostKDistinct(s: str, k: int) -> int:
+ counts = {}
+ left = 0
+ best = 0
+ for right, ch in enumerate(s):
+ counts[ch] = counts.get(ch, 0) + 1
+# Primitive 7: shrink until at most k distinct letters remain
+ while len(counts) > k:
+ counts[s[left]] -= 1
+ if counts[s[left]] == 0:
+ del counts[s[left]] 
+# so len(counts) is the distinct count
+ left += 1
+ best = max(best, right - left + 1)
+ return best
+def count_at_most(nums: list[int], k: int) -> int:
+ counts = {}
+ left = 0
+ total = 0
+ for right, x in enumerate(nums):
+ counts[x] = counts.get(x, 0) + 1
+ while len(counts) > k:
+ counts[nums[left]] -= 1
+ if counts[nums[left]] == 0:
+ del counts[nums[left]]
+ left += 1
+ total += right - left + 1 
+# all valid subarrays ENDING at right
+ return total
+def subarraysWithKDistinct(nums: list[int], k: int) -> int:
+# "Exactly k" is not window-friendly, but "at most k" is:
+ return count_at_most(nums, k) - count_at_most(nums, k - 1)
+The trick:
+exactly(k) = atMost(k) − atMost(k − 1)
+. The same subtraction solves any “exactly” count whose “at most” version is window-friendly (for example, LeetCode 1248 Count Number of Nice Subarrays). 
+Why 
+total += right − left + 1
+:
+ every start between 
+left
+ and 
+right
+ gives a valid subarray ending at 
+right
+.
+Result for 
+subarraysWithKDistinct([1,2,1,2,3], 2)
+: 7
+Example X.6
+Remove Duplicates from Sorted Array II
+LeetCode 80
+Remove duplicates from a sorted array in place so each value appears 
+at most twice
+. Return the new length. Generalizes Example 2.2.
+ Brute Force — Count and Rebuild · O(N) time · O(N) space
+def removeDuplicates_brute_force(nums: list[int], k: int = 2) -> int:
+ seen = {}
+ kept = []
+ for x in nums:
+ if seen.get(x, 0) < k:
+ kept.append(x)
+ seen[x] = seen.get(x, 0) + 1
+ nums[:len(kept)] = kept
+ return len(kept)
+ Optimal — Read & Write with a k-Back Check · O(N) time · O(1) space
+def removeDuplicates(nums: list[int], k: int = 2) -> int:
+# Primitive 1: write pointer
+ write = 0
+# Primitive 2 & 4: read pointer scans every index
+ for read in range(len(nums)):
+# The first k elements are always kept. After that, compare with the
+# element k slots BEHIND the write pointer (a "k-back" check).
+ if write < k or nums[read] != nums[write - k]:
+# Primitive 4: in-place overwrite at the write pointer
+ nums[write] = nums[read]
+ write += 1
+ return write
+k = 1
+ is Remove Duplicates (Example 2.2), 
+k = 2
+ is LeetCode 80, any 
+k
+ works. Comparing with 
+nums[write − k]
+ is enough because the array is sorted: if that slot equals the current value, all 
+k
+ slots in between hold it too.
+ Algorithm Flowchart
+Remove Duplicates II — Compare k Slots Back
+write = 0
+for read in range(n):
+scan every element
+done
+return write
+write < k OR
+nums[read] ≠ nums[write−k] ?
+Yes
+No
+skip
+nums[write] = nums[read]
+write++
+Result for 
+[0,0,1,1,1,1,2,3,3]
+: length 7 → [0,0,1,1,2,3,3]
+Example X.7
+Rotate Array
+LeetCode 189
+Rotate an array to the right by 
+k
+ steps, in place.
+ Brute Force — Extra Array · O(N) time · O(N) space
+def rotate_brute_force(nums: list[int], k: int) -> None:
+ n = len(nums)
+ if n == 0:
+ return
+ rotated = [0] * n
+ for i in range(n):
+ rotated[(i + k) % n] = nums[i]
+ nums[:] = rotated
+ Optimal — Three Reversals · O(N) time · O(1) space
+def rotate(nums: list[int], k: int) -> None:
+# Primitive 1 + Guard: empty array, and k may exceed n
+ n = len(nums)
+ if n == 0:
+ return
+ k %= n
+ def reverse(l: int, r: int) -> None:
+# Pattern 1 + Primitive 3: converge and swap
+ while l < r:
+ nums[l], nums[r] = nums[r], nums[l]
+ l += 1
+ r -= 1
+ reverse(0, n - 1) 
+# whole array
+ reverse(0, k - 1) 
+# first k elements
+ reverse(k, n - 1) 
+# the rest
+Reverse all → reverse first k → reverse the rest · 
+k = 3
+7
+0
+6
+1
+5
+2
+4
+3
+3
+4
+2
+5
+1
+6
+5
+0
+6
+1
+7
+2
+4
+3
+3
+4
+2
+5
+1
+6
+5
+0
+6
+1
+7
+2
+1
+3
+2
+4
+3
+5
+4
+6
+Result for 
+[1,2,3,4,5,6,7], k = 3
+: [5,6,7,1,2,3,4]
+Example X.8
+Subarray Sum Equals K
+LeetCode 560
+Count the contiguous subarrays whose sum equals 
+k
+. The array 
+may contain negative numbers
+.
+ Brute Force — Every Subarray · O(N²) time · O(1) space
+def subarraySum_brute_force(nums: list[int], k: int) -> int:
+ count = 0
+ for i in range(len(nums)):
+ total = 0
+ for j in range(i, len(nums)):
+ total += nums[j]
+ if total == k:
+ count += 1
+ return count
+ Optimal — Prefix Sum + Hash Map · O(N) time · O(N) space
+def subarraySum(nums: list[int], k: int) -> int:
+# Primitive 8: running prefix sum; seen[p] = how many earlier prefixes equal p
+ seen = {0: 1} 
+# the empty prefix
+ running = 0
+ count = 0
+ for x in nums:
+ running += x
+# A subarray ending here sums to k <=> an earlier prefix equals running - k
+ count += seen.get(running - k, 0)
+ seen[running] = seen.get(running, 0) + 1
+ return count
+Why not a sliding window?
+ With negatives, growing the window can 
+lower
+ the sum, so “shrink when too big” is no longer valid. 
+The prefix trick:
+sum(i..j) = prefix[j+1] − prefix[i] = k
+, so look for earlier prefixes equal to 
+running − k
+. (Hash tables are formalized in Volume 3, Hash Lookup; this is a preview.)
+ Algorithm Flowchart
+Subarray Sum Equals K — Prefix Sum + Hash Map
+seen = {0: 1}; running = 0; count = 0
+for x in nums:
+extend the prefix
+done
+return count
+running += x
+count += seen[running − k]
+seen[running] += 1
+Result for 
+[1,2,3], k = 3
+: 2
+▶
+ Reference
+Cheat Sheet
+All 7 patterns, mechanics, and complexity at a glance
+Pattern
+Core Mechanics
+Target LeetCode Problems
+Time & Space
+P1 · Converging
+left = 0, right = n-1
+while left < right:
+344 Reverse String · 167 Two Sum II
+11 Container With Most Water · 15 3Sum
+42 Trapping Rain Water
+5 Longest Palindromic Substring 
+(outward)
+O(N)
+O(1)
+P2 · Read-Write
+write = 0
+for read in range(n):
+27 Remove Element
+26 Remove Duplicates · 283 Move Zeroes
+80 Remove Duplicates II · 75 Sort Colors
+189 Rotate Array
+O(N)
+O(1)
+P3 · Backwards Write
+i, j, write = m-1, n-1, m+n-1
+write -= 1
+977 Squares of a Sorted Array
+88 Merge Sorted Array
+O(N)
+O(1) or O(N)
+P4 · Sliding Window
+for right in range(n):
+    expand → shrink
+643 Max Average Subarray I
+3 Longest Substring · 209 Min Size Subarray
+438 Find All Anagrams
+424 Char Replacement · 904 / 992 K-Distinct
+O(N)
+O(1)–O(k)
+P5 · Two-Array Merge
+i = j = 0
+while i < len1 and j < len2:
+392 Is Subsequence
+350 Intersection of Two Arrays II
+Practice next: 986 Interval List Intersections
+O(N+M)
+O(1)
+P6 · Prefix Sum
+prefix[i+1] = prefix[i] + nums[i]
+query = prefix[r+1] − prefix[l]
+303 Range Sum Query
+724 Find Pivot Index
+238 Product of Array Except Self
+560 Subarray Sum = K 
+(prefix + hash)
+O(N) build · O(1) query
+O(N) or O(1)
+P7 · Kadane
+here = max(nums[i], here + nums[i])
+best = max(best, here)
+53 Maximum Subarray
+152 Maximum Product Subarray
+Practice next: 918 Max Sum Circular Subarray
+O(N)
+O(1)
+Guarded Skipping
+cross-cutting
+while left < right and skip_condition:
+    left += 1
+15 3Sum · 125 Valid Palindrome
+O(N)
+O(1)
+▶
+ Choosing Safely
+When a Pattern Breaks
+The signal that tells you to switch
+Pattern
+Needs
+Breaks when…
+Switch to
+P1 · Converging
+Sorted or symmetric data
+Input is unsorted and you need pairs
+Sort first (Vol 2) or hash lookup (Vol 3)
+P2 · Read-Write
+Keep/skip decided from nearby elements
+The output must be 
+longer
+ than the input
+Backwards Write (P3), e.g. 1089 Duplicate Zeros
+P3 · Backwards Write
+Spare room at the end, or sorted inputs
+No spare room, or inputs unsorted
+Extra array, or sort first
+P4 · Sliding Window
+Adding hurts, removing helps (monotone)
+Negative numbers, or an “exactly k” condition
+Prefix + hash (X.8) or atMost(k) − atMost(k−1) (X.5)
+P5 · Two-Array Merge
+Both arrays sorted
+Either array is unsorted
+Sort first, or a hash set (Vol 3)
+P6 · Prefix Sum
+Static array, invertible operation
+Values change between queries, or you need min/max
+Fenwick / segment tree (Vol 4), monotonic deque (Vol 3)
+P7 · Kadane
+Contiguous subarray, sum or product goal
+Extra limits: max length, circular, k deletions
+Prefix + deque (Vol 3), DP (Vol 6). Circular (918) = max(Kadane, total − min-Kadane)
+Two-pointer family:
+ P1–P5 and Guarded Skipping all move two indices; P4 and X.5 also carry window state. Outward expansion (X.2) and the three-pointer partition (X.1) are the two common variants.
+▶
+ Debugging
+7 Critical Bugs
+And how to prevent them
+1
+Off-by-One Boundary Errors
+Always initialize 
+right = len(nums) - 1
+. Writing 
+right = len(nums)
+ causes an 
+IndexError
+ on the first iteration.
+2
+Unbounded Skipping Loops
+Inner skipping loops 
+must
+ prepend 
+left < right
+. Otherwise pointers run past valid indices and either crash or loop forever.
+3
+Overwriting Before Reading
+In Read-Write patterns, always evaluate 
+nums[read]
+before
+ executing 
+nums[write] = nums[read]
+.
+4
+Modifying Array Size Inside For Loops
+Avoid 
+nums.pop()
+ or 
+del nums[i]
+ during iteration. Use Read-Write pointers to overwrite in place and return a virtual length.
+5
+Forgetting to Remove From Window State on Shrink
+Sliding-window bugs come from a window state that drifts out of sync with 
+[left, right]
+. Every element added on expand must be removed on shrink. 
+Primitive 7's symmetric add/remove pair is the fix.
+6
+Prefix Array Missing the Leading Zero
+Build 
+prefix = [0] * (n + 1)
+, not 
+[0] * n
+. Without the leading 
+prefix[0] = 0
+, the query 
+sumRange(0, r)
+ has no clean left boundary and you'll special-case every 
+left == 0
+ call. The extra slot eliminates the entire class of edge-case bugs.
+7
+Kadane Initialized to 0 Instead of nums[0]
+On an all-negative array, initializing 
+best = 0
+ returns 0 instead of the largest (least negative) element. Initialize both 
+best
+ and 
+here
+ to 
+nums[0]
+. For the product variant, also track 
+min_ending_here
+ — a negative times a negative can become the new maximum.
+▶
+ Practice
+Pattern Templates
+Fill in the blanks from memory
+Cover the solutions above and complete each skeleton. Every blank (
+____
+) is a decision the pattern forces you to make.
+P1 · Converging
+left, right = 0, len(nums) - 1
+while left < right:
+ total = ____
+ if total < ____: left += 1
+ elif total > ____: right -= 1
+ else: ____
+P2 · Read-Write
+write = 0
+for read in range(len(nums)):
+ if ____:
+ nums[write] = nums[read]
+ write += 1
+return write
+P3 · Backwards Write
+res = [0] * n
+left, right, write = 0, n-1, n-1
+while left <= right:
+ if ____:
+ res[write] = ____; left += 1
+ else:
+ res[write] = ____; right -= 1
+ write -= 1
+P4 · Sliding Window
+left = 0
+for right in range(len(nums)):
+ # expand: add nums[right]
+ while ____: # window invalid?
+ # shrink: remove nums[left]
+ left += 1
+ best = ____(best, right-left+1)
+P5 · Two-Array Merge
+i = j = 0
+while i < len(a) and j < len(b):
+ if a[i] == b[j]:
+ ____; i += 1; j += 1
+ elif a[i] < b[j]: i += 1
+ else: j += 1
+P6 · Prefix Sum
+prefix = [0] * (n + 1)
+for i in range(n):
+ prefix[i + 1] = prefix[i] + ____
+range_sum = prefix[____] - prefix[____]
+P7 · Kadane
+here = best = nums[0]
+for x in nums[1:]:
+ here = max(____, here + x)
+ best = max(best, ____)
+return best
+Guarded Skipping
+while left < right and ____:
+ left += 1
+while left < right and ____:
+ right -= 1
+Edge-Case Checklist
+Run through this before you submit
+Empty input and single-element input
+All elements equal; many duplicates
+Negatives and zeros (windows break; products zero out)
+Already sorted and reverse sorted
+k = 0
+, 
+k ≥ n
+, or 
+k > n
+ (rotate: 
+k %= n
+)
+Loop bound: 
+<
+ or 
+<=
+ — is the last element processed?
+Inner skipping loops start with 
+left < right
+Mutated in place or returned a new list?
+After a swap, does the swapped-in value still need checking?
+Unicode, case, non-alphanumeric characters (strings)
+Java / C++: 
+mid = lo + (hi − lo) / 2
+; sums in 
+long
+Does a stale value (like 
+max_freq
+) stay safe? State why.
+▶
+ Practice
+Practice Ladder
+Tick the box when you can solve it cold
+Pattern
+Solved in this guide
+Practice next (easy → hard)
+P1 · Converging
+344 Reverse String
+167 Two Sum II
+11 Container With Most Water
+15 3Sum
+42 Trapping Rain Water
+5 Longest Palindromic Substring
+16 3Sum Closest
+18 4Sum
+647 Palindromic Substrings
+P2 · Read-Write
+27 Remove Element
+26 Remove Duplicates
+283 Move Zeroes
+80 Remove Duplicates II
+75 Sort Colors
+189 Rotate Array
+905 Sort Array By Parity
+443 String Compression
+P3 · Backwards Write
+977 Squares of a Sorted Array
+88 Merge Sorted Array
+1089 Duplicate Zeros
+360 Sort Transformed Array (premium)
+P4 · Sliding Window
+643 Max Average Subarray I
+3 Longest Substring
+209 Min Size Subarray
+438 Find All Anagrams
+424 Char Replacement
+904 K-Distinct Fruit
+992 Exactly K Distinct
+567 Permutation in String
+1004 Max Consecutive Ones III
+713 Subarray Product < K
+76 Minimum Window Substring
+P5 · Two-Array Merge
+392 Is Subsequence
+350 Intersection II
+349 Intersection of Two Arrays
+925 Long Pressed Name
+986 Interval List Intersections
+P6 · Prefix Sum
+303 Range Sum Query
+724 Find Pivot Index
+238 Product Except Self
+560 Subarray Sum = K
+1480 Running Sum of 1D Array
+525 Contiguous Array
+304 Range Sum Query 2D
+P7 · Kadane
+53 Maximum Subarray
+152 Maximum Product Subarray
+121 Best Time to Buy & Sell Stock
+1749 Max Absolute Sum of Any Subarray
+918 Max Sum Circular Subarray
+Guarded Skipping
+125 Valid Palindrome
+844 Backspace String Compare
+680 Valid Palindrome II
+▶
+ Series Roadmap
+The 7-Volume Plan
+Where Volume 1 sits in the full series
+ Each volume covers one data-structure family. Within a volume you learn the primitives that structure needs, then the patterns built on those primitives. Base primitives (1–8) carry forward; structure primitives (numbered per-volume) stay local.
+Vol
+Data-Structure Family
+Patterns
+Problems
+Status
+V1
+Arrays & Strings
+Converging · Read-Write · Backwards Write · Sliding Window · Two-Array Merge · Prefix Sum · Kadane
++ Guarded Skipping (cross-cutting) · Two Pointers family = P1–P5
++ Extensions: 3-way partition · outward expansion · K-distinct windows · prefix + hash
+30
+✓ Shipped
+V2
+Sorted Arrays, Ranges & Matrices
+Classic Binary Search · Binary Search on Answer · Rotated/Modified Search · Sort + Two Pointers · Merge Intervals / Sweep Line · Matrix Traversal & In-Place Rotation
+~38
+Next up
+V3
+Hash, Stack, Deque, Heap
+Hash Lookup · Frequency Counting · Prefix Sum + Hash Map · Monotonic Stack · Monotonic Deque · Top-K Heap · Two Heaps · Merge-K
+~38
+Planned
+V4
+Linked Lists, Trees, Tries & Range Trees
+Fast & Slow · In-Place Reversal · Tree DFS · Tree BFS · BST Operations · Trie · Segment Tree · Fenwick (BIT)
+~40
+Planned
+V5
+Graphs & Grids
+Graph BFS · Graph DFS · Topological Sort · Union-Find · Dijkstra · MST
+~30
+Planned
+V6
+Dynamic Programming
+1D DP · 2D Grid DP · Knapsack · LIS · LCS / Edit Distance · Interval DP · Tree DP · Bitmask DP
+~40
+Planned
+V7
+Recursion, Divide & Conquer, Greedy, Bits, Math, Design
+Subsets / Perms / Combos · N-Queens · Divide & Conquer (Merge Sort, Quickselect) · Interval Scheduling · Jump Game · Greedy Invariant · XOR Tricks · Math & Number Theory (GCD, Sieve, Fast Power) · LRU / LFU
+~40
+Planned
+📐 New Primitives Per Volume
+V2 (Sorted Arrays, Ranges, Matrices):
+ Midpoint Calculation · Range Halving · Interval Overlap Test · Sweep Events · 2D Index Mapping · Layer Boundary Shrinking.
+V3 (Hash / Stack / Deque / Heap):
+ Hash Insert/Lookup/Delete · Stack Push/Pop · Deque Push/Pop Both Ends · Heap Push/Pop with Priority.
+V4 (Nodes & Range Trees):
+ Node Traversal · Recursive Descent · Traversal Orders · Lowbit Update/Query · Segment Node Merge.
+V5 (Graphs):
+ Adjacency List Construction · Visited-Set Discipline · Union-Find · Priority-Queue Relaxation.
+V6 (DP):
+ Recurrence + Base Case · Memoization Cache · Tabulation Table · Space-Optimization Reduction.
+V7 (Recursion / D&C / Greedy / Bits / Math):
+ Choose-Explore-Unchoose · Split-Solve-Combine · Greedy Local Choice + Invariant · Bit Operations · Modular Arithmetic · GCD Loop · Sieve Marking.
+Coverage Map
+Where the famous interview problems land
+Vol
+Famous problems that live there
+V1
+Product of Array Except Self · Maximum Subarray · Maximum Product Subarray · 3Sum · Container With Most Water · Trapping Rain Water · Longest Substring Without Repeating · Longest Repeating Character Replacement · Valid Palindrome · Longest Palindromic Substring · Palindromic Substrings · Sort Colors · Rotate Array. 
+Practice ladder: Best Time to Buy & Sell Stock · Minimum Window Substring
+V2
+Find Minimum in Rotated Sorted Array · Search in Rotated Sorted Array · Merge Intervals · Insert Interval · Meeting Rooms I/II · Set Matrix Zeroes · Spiral Matrix · Rotate Image
+V3
+Two Sum · Contains Duplicate · Valid Anagram · Group Anagrams · Valid Parentheses · Longest Consecutive Sequence · Top K Frequent Elements · Find Median from Data Stream · Merge K Sorted Lists · Subarray Sum Equals K (previewed in X.8)
+V4
+Reverse Linked List · Linked List Cycle · Merge Two Sorted Lists · Reorder List · Remove Nth Node From End · Invert / Max-Depth / Same / Subtree · Level-Order · Validate BST · Lowest Common Ancestor · Serialize & Deserialize · Implement Trie · Range Sum Query – Mutable
+V5
+Number of Islands · Clone Graph · Course Schedule I/II · Pacific Atlantic Water Flow · Graph Valid Tree · Connected Components · Alien Dictionary
+V6
+Climbing Stairs · House Robber I/II · Coin Change · Longest Increasing Subsequence · Longest Common Subsequence · Word Break · Decode Ways · Unique Paths · Combination Sum IV
+V7
+Subsets · Combination Sum · Word Search · Jump Game · Non-overlapping Intervals · Number of 1 Bits · Counting Bits · Missing Number · Reverse Bits · Sum of Two Integers · Pow(x, n) · Kth Largest (Quickselect) · LRU Cache
+Spot-checked against the widely used Blind 75 / NeetCode lists. Volumes 2–7 are planned, so placements may shift as each volume is written.
+ LeetCode Foundations · Volume 1 of 7 · 8 Primitives · 7 Patterns · Guarded Skipping · Printable Study Guide
