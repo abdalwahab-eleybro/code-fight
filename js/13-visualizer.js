@@ -7,7 +7,19 @@
 /* ═══════════════════════════════════════════════════════════ */
 window.CF = window.CF || {};
 
-
+/* ─────────────────────────────────────────────────────────── */
+/*  EASINGS — shared motion vocabulary (Manim-style curves).   */
+/*  Every choreographed move in the app pulls from this table  */
+/*  so pointer glides, value morphs and packet rides all feel  */
+/*  like ONE engine instead of ad-hoc CSS defaults.            */
+/* ─────────────────────────────────────────────────────────── */
+CF.Ease = {
+  smooth: t => t * t * (3 - 2 * t),                                   /* smoothstep  */
+  outCubic: t => 1 - Math.pow(1 - t, 3),                              /* decelerate  */
+  inOutCubic: t => (t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
+  outBack: t => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); },
+  outElastic: t => t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - .75) * (2 * Math.PI / 3)) + 1
+};
 
 /* ─────────────────────────────────────────────────────────── */
 /*  NARRATOR — narration goes in the AUDIO channel,            */
@@ -566,130 +578,369 @@ CF.Visualizer = (() => {
 
 
 
-  /* ── SCENE RENDER (shared by watch / drive modes) ── */
-  function renderScene(stage, state) {
-    if (!state) return;
-    stage.innerHTML = '';
+  /* ══════════════════════════════════════════════════════════
+     SCENE ENGINE (shared by watch / drive / idea / problem)
+     Manim-style continuity: DOM objects PERSIST across steps and
+     are diffed against the new state — cells morph in place
+     (numbers roll, bars grow), pointers GLIDE between indices,
+     marks bloom, chips flip. Only a structural change (array
+     length differs) triggers a clean re-layout with a soft fade,
+     never a hard innerHTML wipe mid-scene.
+     ══════════════════════════════════════════════════════════ */
 
-    /* main array row */
-    const main = document.createElement('div');
-    main.className = 'vz-row';
-    stage.appendChild(main);
+  /* one shared rAF scheduler: cancel stale tweens on fast scrubbing */
+  const tweens = new Map();
+  let rafId = null;
+  function runTweens(now) {
+    tweens.forEach((tw, key) => {
+      if (tw.dead) { tweens.delete(key); return; }
+      const t = Math.min(1, (now - tw.t0) / tw.dur);
+      const e = tw.ease(t);
+      tw.onUpdate(e, t);
+      if (t >= 1) { tweens.delete(key); if (tw.onEnd) tw.onEnd(); }
+    });
+    rafId = tweens.size ? requestAnimationFrame(runTweens) : null;
+  }
+  function tween(key, dur, ease, onUpdate, onEnd) {
+    tweens.delete(key); /* re-issue cancels the previous animation of this object */
+    tweens.set(key, { t0: performance.now(), dur, ease: ease || CF.Ease.inOutCubic, onUpdate, onEnd, dead: false });
+    if (!rafId) rafId = requestAnimationFrame(runTweens);
+  }
+  function killTween(key) { const tw = tweens.get(key); if (tw) tw.dead = true; tweens.delete(key); }
 
-    const arr = state.arr || [];
+  /* per-element motion memory: prev values / prev pointer x / prev marks */
+  function meta(el) {
+    if (!el._mt) el._mt = {};
+    return el._mt;
+  }
+
+  function markOf(state, i) {
+    return (state.marks && (state.marks[i] || state.marks[String(i)])) || '';
+  }
+
+  /* number roll: old digit morphs into new one (TransformMatchingObjects) */
+  function rollNumber(valEl, from, to, durMs) {
+    const numFrom = Number(from), numTo = Number(to);
+    if (!(isFinite(numFrom) && isFinite(numTo)) || !valEl.animate) {
+      valEl.textContent = String(to);
+      if (valEl.animate) valEl.animate([{ transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 260, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+      return;
+    }
+    const t0 = performance.now(), dur = durMs || 420;
+    const key = 'roll:' + (valEl._rk || (valEl._rk = Math.random().toString(36).slice(2)));
+    tween(key, dur, CF.Ease.outCubic, (e) => {
+      valEl.textContent = String(Math.round(numFrom + (numTo - numFrom) * e));
+    });
+  }
+
+  /* build a fresh cell (used on first paint / structural relayout) */
+  function makeCell(v, i, frac, small) {
+    const cell = document.createElement('div');
+    cell.className = 'vz-cell' + (small ? ' small' : '');
+    cell.dataset.i = i;
+    cell.style.setProperty('--h', Math.round(frac * 100) + '%');
+    cell.innerHTML = `<span class="vz-fill" style="height:${Math.round(28 + frac * 54)}px"></span>` +
+                     `<span class="vz-val">${esc(v)}</span>`;
+    meta(cell).value = v;
+    meta(cell).frac = frac;
+    return cell;
+  }
+
+  /* animate ONE row toward its target state, reusing existing cells */
+  function syncRow(row, arr, marks, small, speedK) {
     const nums = arr.filter(x => typeof x === 'number');
     const lo = Math.min.apply(null, nums.length ? nums : [0]);
     const hi = Math.max.apply(null, nums.length ? nums : [1]);
+    const dur = (ms) => ms * (speedK || 1);
 
-    /* POLISH A: long rows shrink their cells to fit the stage instead of
-       overflowing into a scrollbar — positions stay measurable for arcs and
-       the whole array is visible at once (Manim frames every object). */
-    const availW = (stage.clientWidth || 640) - 8;
-    const wide = Math.max(30, Math.min(46, Math.floor(availW / Math.max(1, arr.length)) - 6));
+    /* reuse or create cells positionally */
+    const old = Array.from(row.children);
     arr.forEach((v, i) => {
-      const cell = document.createElement('div');
-      const mk = state.marks?.[i] || state.marks?.[String(i)] || '';
-      cell.className = 'vz-cell' + (mk ? ' ' + mk : '');
-      if (wide < 46) cell.style.width = wide + 'px';
-      cell.dataset.i = i;
-      let frac = 0.6;
-      if (typeof v === 'number') frac = hi > lo ? (v - lo) / (hi - lo) : 0.6;
-      else frac = 0.5;
-      cell.style.setProperty('--h', Math.round(frac * 100) + '%');
-      /* .vz-fill: a real px height that CSS can tween — the animated bar
-         behind the value (3b1b-style growth/morph of the bars) */
-      cell.innerHTML = `<span class="vz-fill" style="height:${Math.round(28 + frac * 54)}px"></span>` +
-                       `<span class="vz-val">${esc(v)}</span>`;
-      main.appendChild(cell);
-    });
-
-    /* pointer layer under main row */
-    const ptrLayer = document.createElement('div');
-    ptrLayer.className = 'vz-ptrs';
-    stage.appendChild(ptrLayer);
-    positionPointers(ptrLayer, main, state.ptrs || {}, arr.length);
-
-    /* aux chips (sum, target, best…) */
-    if (state.aux && state.aux.length) {
-      const aux = document.createElement('div');
-      aux.className = 'vz-aux';
-      state.aux.forEach(a => {
-        const chip = document.createElement('span');
-        chip.className = 'vz-aux-chip';
-        chip.innerHTML = `<b>${esc(a.label)}</b> ${esc(a.value)}`;
-        aux.appendChild(chip);
-      });
-      stage.appendChild(aux);
-    }
-
-    /* second row (prefix arrays / output rows) */
-    if (state.row2) {
-      const r2wrap = document.createElement('div');
-      r2wrap.className = 'vz-row2-wrap';
-      const lbl = document.createElement('div');
-      lbl.className = 'vz-row2-label';
-      lbl.textContent = state.row2.label || '';
-      r2wrap.appendChild(lbl);
-
-      const row = document.createElement('div');
-      row.className = 'vz-row small';
-      (state.row2.arr || []).forEach((v, i) => {
-        const cell = document.createElement('div');
-        const mk = state.row2.marks?.[i] || state.row2.marks?.[String(i)] || '';
-        cell.className = 'vz-cell ' + (mk || '');
-        cell.dataset.i = i;
-        if (typeof v === 'number') {
-          const frac = hi > lo ? (v - lo) / (hi - lo) : 0.5;
-          cell.style.setProperty('--h', (24 + Math.round(frac * 40)) + '%');
-        } else { cell.style.setProperty('--h', '36%'); }
-        cell.innerHTML = `<span class="vz-val">${esc(v)}</span>`;
-        row.appendChild(cell);
-      });
-      r2wrap.appendChild(row);
-      stage.appendChild(r2wrap);
-
-      if (state.row2.ptrs && Object.keys(state.row2.ptrs).length) {
-        const p2 = document.createElement('div');
-        p2.className = 'vz-ptrs';
-        stage.appendChild(p2);
-        positionPointers(p2, row, state.row2.ptrs, (state.row2.arr || []).length);
+      const frac = typeof v === 'number' ? (hi > lo ? (v - lo) / (hi - lo) : 0.6) : 0.5;
+      let cell = old[i];
+      if (!cell || cell.classList.contains('vz-exiting')) {
+        cell = makeCell(v, i, frac, small);
+        if (old[i]) old[i].remove();
+        row.insertBefore(cell, old[i + 1] || null);
+        cell.classList.add('vz-entering');
+        setTimeout(() => cell.classList.remove('vz-entering'), 400);
+      } else {
+        const m = meta(cell);
+        /* VALUE MORPH: only when the number actually changed */
+        if (String(m.value) !== String(v)) {
+          rollNumber(cell.querySelector('.vz-val'), m.value, v, dur(420));
+          m.value = v;
+        }
+        /* BAR GROW/MORPH via CSS-tweened --h + fill height */
+        if (m.frac !== frac) {
+          cell.style.setProperty('--h', Math.round(frac * 100) + '%');
+          cell.querySelector('.vz-fill').style.height = Math.round(28 + frac * 54) + 'px';
+          m.frac = frac;
+        }
       }
+      /* MARK TRANSFORMS: bloom on enter, settle on leave */
+      const mk = marks && (marks[i] || marks[String(i)]) || '';
+      const prevMk = meta(cell).mark || '';
+      if (prevMk !== mk) {
+        ['cmp', 'win', 'out', 'write'].forEach(c => cell.classList.remove(c));
+        if (mk) {
+          cell.classList.add(mk);
+          if (cell.animate) {
+            const col = mk === 'win' ? '251,191,36' : mk === 'write' ? '34,197,94' : mk === 'cmp' ? '34,211,238' : '148,163,184';
+            cell.animate([
+              { boxShadow: `0 0 0 0 rgba(${col},.6)` },
+              { boxShadow: `0 0 0 8px rgba(${col},0)` }
+            ], { duration: dur(520), easing: 'ease-out' });
+          }
+        }
+        meta(cell).mark = mk;
+      }
+    });
+    /* cells beyond the new length fade out (FadeOut) */
+    for (let i = arr.length; i < old.length; i++) {
+      const c = old[i];
+      if (!c || c.classList.contains('vz-exiting')) continue;
+      c.classList.add('vz-exiting');
+      if (c.animate) c.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(8px) scale(.8)' }], { duration: dur(260), fill: 'forwards' });
+      setTimeout(() => c.remove(), dur(300));
     }
   }
 
-  function positionPointers(layer, row, ptrs, n) {
-    Object.keys(ptrs).forEach(id => {
+  /* pointers glide: keep the same DOM node, animate left → left */
+  function positionPointers(layer, row, ptrs, n, speedK) {
+    const cells = row.querySelectorAll('.vz-cell:not(.vz-exiting)');
+    const lr = layer.getBoundingClientRect();
+    const wantIds = Object.keys(ptrs || {});
+    /* retire pointers that vanished */
+    layer.querySelectorAll('.vz-ptr').forEach(el => {
+      if (!wantIds.includes(el.dataset.ptr)) {
+        if (el.animate) el.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateX(-50%) translateY(6px)' }], { duration: 220, fill: 'forwards' });
+        setTimeout(() => el.remove(), 240);
+      }
+    });
+    wantIds.forEach(id => {
       const i = ptrs[id];
-      let el = layer.querySelector(`[data-ptr="${id}"]`);
+      let el = layer.querySelector(`[data-ptr="${CSS.escape ? CSS.escape(id) : id}"]`) ||
+               Array.from(layer.querySelectorAll('.vz-ptr')).find(x => x.dataset.ptr === id);
       if (!el) {
         el = document.createElement('div');
-        el.className = 'vz-ptr';
+        el.className = 'vz-ptr vz-ptr-new';
         el.dataset.ptr = id;
         el.innerHTML = `<span class="vz-ptr-tag">${esc(id)}</span><span class="vz-ptr-arrow">▲</span>`;
         layer.appendChild(el);
       }
-      const cells = row.querySelectorAll('.vz-cell');
-      const cell = cells[Math.max(0, Math.min(i, cells.length - 1))];
-      if (cell) {
-        /* rect-based positioning: correct no matter which ancestor is the
-           offsetParent (the idea-phase mini stage is not position:relative
-           the way the player stage is, so offsetLeft measured from the
-           wrong origin and every pointer shifted right) */
-        const lr = layer.getBoundingClientRect();
-        const cr = cell.getBoundingClientRect();
-        if (i > cells.length - 1) {
-          /* pointer past the last cell (e.g. 'r+1' at the exclusive right
-             edge): hover it just beyond the row instead of clamping it onto
-             the last cell, which is a different index */
-          el.style.left = (cr.right - lr.left + 4) + 'px';
-        } else {
-          el.style.left = (cr.left - lr.left + cr.width / 2) + 'px';
-        }
-      }
+      const idx = Math.max(0, Math.min(i, cells.length - 1));
+      const cell = cells[idx];
+      if (!cell) return;
+      const cr = cell.getBoundingClientRect();
+      const targetX = (i > cells.length - 1)
+        ? (cr.right - lr.left + 4)                    /* past-the-end pointer hovers beyond the row */
+        : (cr.left - lr.left + cr.width / 2);
+      const m = meta(el);
+      const fromX = (typeof m.x === 'number' && el.style.left) ? m.x : targetX;
       const col = PTR_COLORS[id] || 'var(--player)';
-      el.style.color = col;              /* arrow + fallbacks */
-      el.style.setProperty('--ptr-col', col); /* name chip background */
+      el.style.color = col;
+      el.style.setProperty('--ptr-col', col);
+      if (Math.abs(fromX - targetX) > 1) {
+        /* GLIDE along an eased path (MotionMatcher-style smooth travel) */
+        tween('ptr:' + id + ':' + (layer._uid || (layer._uid = Math.random().toString(36).slice(2))),
+          380 * (speedK || 1), CF.Ease.inOutCubic,
+          (e) => { const x = fromX + (targetX - fromX) * e; el.style.left = x + 'px'; m.x = x; },
+          () => { m.x = targetX; el.style.left = targetX + 'px'; });
+      } else {
+        el.style.left = targetX + 'px'; m.x = targetX;
+      }
     });
+  }
+
+  /* aux chips: text-swap animates (Flip-ish pop), added chips slide in */
+  function syncAux(stage, auxList) {
+    let aux = stage.querySelector(':scope > .vz-aux');
+    if (!auxList || !auxList.length) { if (aux) aux.remove(); return; }
+    if (!aux) { aux = document.createElement('div'); aux.className = 'vz-aux'; stage.appendChild(aux); }
+    const want = auxList.map(a => `${a.label}\u0000${a.value}`);
+    /* remove stale / exiting */
+    Array.from(aux.children).forEach(ch => {
+      if (!want.includes(ch.dataset.k)) {
+        if (ch.animate) ch.animate([{ opacity: 1 }, { opacity: 0, transform: 'scale(.85)' }], { duration: 200, fill: 'forwards' });
+        setTimeout(() => ch.remove(), 220);
+        ch.dataset.k = '\u0000dead'; /* don't double-process */
+      }
+    });
+    want.forEach((k, i) => {
+      let chip = Array.from(aux.children).find(c => c.dataset.k === k);
+      if (!chip) {
+        const a = auxList[i];
+        chip = document.createElement('span');
+        chip.className = 'vz-aux-chip';
+        chip.dataset.k = k;
+        chip.innerHTML = `<b>${esc(a.label)}</b> ${esc(a.value)}`;
+        aux.appendChild(chip);
+        if (chip.animate) chip.animate(
+          [{ opacity: 0, transform: 'translateY(6px) scale(.9)' }, { opacity: 1, transform: 'none' }],
+          { duration: 300, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+      } else if (chip.dataset.stale) {
+        delete chip.dataset.stale;
+      }
+    });
+  }
+
+  /* ── PUBLIC: render/animate a scene toward `state`.
+        opts.fx  → sceneFx choreography overlay (rings/dim/arcs/pulse)
+        opts.cut → force clean relayout (phase switches)            ── */
+  function renderScene(stage, state, opts) {
+    if (!state) return;
+    opts = opts || {};
+    const speedK = 1;
+
+    /* structural check: does the persistent layout still match? */
+    const rowSel = opts.smallRow ? '.vz-row.small' : ':scope > .vz-row:not(.small)';
+    let main = stage.querySelector(':scope > .vz-row');
+    let ptrLayer = stage.querySelector(':scope > .vz-ptrs:first-of-type');
+    const arr = state.arr || [];
+    const structOk = main && ptrLayer &&
+      main.querySelectorAll('.vz-cell:not(.vz-exiting)').length === arr.length &&
+      !opts.cut;
+
+    if (!structOk) {
+      /* full (re)build — but with a SOFT cut, not a blink */
+      stage.querySelectorAll(':scope > .vz-row, :scope > .vz-ptrs, :scope > .vz-aux, :scope > .vz-row2-wrap, :scope > .vz-fx-svg').forEach(n => n.remove());
+      main = document.createElement('div');
+      main.className = 'vz-row';
+      stage.appendChild(main);
+      arr.forEach((v, i) => {
+        const nums = arr.filter(x => typeof x === 'number');
+        const lo = Math.min.apply(null, nums.length ? nums : [0]);
+        const hi = Math.max.apply(null, nums.length ? nums : [1]);
+        const frac = typeof v === 'number' ? (hi > lo ? (v - lo) / (hi - lo) : 0.6) : 0.5;
+        const cell = makeCell(v, i, frac, false);
+        /* POLISH A: long rows shrink cells to fit — positions stay
+           measurable for arcs, whole array framed at once */
+        const availW = (stage.clientWidth || 640) - 8;
+        const wide = Math.max(30, Math.min(46, Math.floor(availW / Math.max(1, arr.length)) - 6));
+        if (wide < 46) cell.style.width = wide + 'px';
+        const mk = markOf(state, i);
+        if (mk) { cell.classList.add(mk); meta(cell).mark = mk; }
+        main.appendChild(cell);
+      });
+      ptrLayer = document.createElement('div');
+      ptrLayer.className = 'vz-ptrs';
+      stage.appendChild(ptrLayer);
+      stage.classList.remove('vz-cut'); void stage.offsetWidth; stage.classList.add('vz-cut');
+    } else {
+      /* in-place morph: cells roll/grow, marks bloom */
+      const availW = (stage.clientWidth || 640) - 8;
+      const wide = Math.max(30, Math.min(46, Math.floor(availW / Math.max(1, arr.length)) - 6));
+      Array.from(main.children).forEach(c => { if (wide < 46) c.style.width = wide + 'px'; });
+      syncRow(main, arr, state.marks, false, speedK);
+    }
+
+    positionPointers(ptrLayer, main, state.ptrs || {}, arr.length, speedK);
+    syncAux(stage, state.aux);
+
+    /* second row (prefix arrays / output rows) */
+    if (state.row2) {
+      let wrap = stage.querySelector(':scope > .vz-row2-wrap');
+      const r2arr = state.row2.arr || [];
+      if (!wrap) {
+        wrap = document.createElement('div');
+        wrap.className = 'vz-row2-wrap';
+        wrap.innerHTML = `<div class="vz-row2-label"></div><div class="vz-row small"></div>`;
+        stage.appendChild(wrap);
+      }
+      wrap.querySelector('.vz-row2-label').textContent = state.row2.label || '';
+      syncRow(wrap.querySelector('.vz-row.small'), r2arr, state.row2.marks, true, speedK);
+      let p2 = wrap.querySelector(':scope > .vz-ptrs');
+      if (state.row2.ptrs && Object.keys(state.row2.ptrs).length) {
+        if (!p2) { p2 = document.createElement('div'); p2.className = 'vz-ptrs'; wrap.appendChild(p2); }
+        positionPointers(p2, wrap.querySelector('.vz-row.small'), state.row2.ptrs, r2arr.length, speedK);
+      } else if (p2) p2.remove();
+    } else {
+      const wrap = stage.querySelector(':scope > .vz-row2-wrap');
+      if (wrap) wrap.remove();
+    }
+
+    /* sceneFx choreography overlay (hand-authored beats + auto-diff) */
+    applySceneFx(stage, state, opts.fx);
+  }
+
+  /* ── sceneFx: rings, dim focus, self-drawing arcs + packet rides,
+        halo pulses. All positioned from live cell rects so they work
+        inside the player stage AND the mini stages alike. ── */
+  function applySceneFx(stage, state, fx) {
+    let svg = stage.querySelector(':scope > .vz-fx-svg');
+    if (!fx) {
+      stage.querySelectorAll('.vz-cell.vz-ring, .vz-cell.vz-dim').forEach(c => c.classList.remove('vz-ring', 'vz-dim'));
+      if (svg) svg.remove();
+      return;
+    }
+    const cells = Array.from(stage.querySelectorAll(':scope > .vz-row > .vz-cell'));
+    const sr = stage.getBoundingClientRect();
+    const centers = cells.map(c => {
+      const r = c.getBoundingClientRect();
+      return { x: r.left - sr.left + r.width / 2, y: r.top - sr.top + r.height / 2, w: r.width, h: r.height };
+    });
+    /* dim everything outside the focus set → "this move, and only this" */
+    const focus = new Set((fx.cells || []).concat(fx.ring || [], fx.arc ? fx.arc : [], fx.pulse != null ? [fx.pulse] : []));
+    cells.forEach((c, i) => {
+      c.classList.toggle('vz-dim', !!fx.dim && focus.size > 0 && !focus.has(i));
+      c.classList.toggle('vz-ring', !!(fx.ring && fx.ring.includes(i)));
+    });
+    /* SVG overlay: arcs + packets + halo */
+    if (!svg) {
+      svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'vz-fx-svg');
+      stage.appendChild(svg);
+    }
+    svg.innerHTML = '';
+    const NS = 'http://www.w3.org/2000/svg';
+    const color = fx.color || '#fbbf36';
+    if (fx.pulse != null && centers[fx.pulse]) {
+      const c = centers[fx.pulse];
+      const halo = document.createElementNS(NS, 'circle');
+      halo.setAttribute('cx', c.x); halo.setAttribute('cy', c.y); halo.setAttribute('r', c.w * 0.7);
+      halo.setAttribute('fill', 'none'); halo.setAttribute('stroke', color); halo.setAttribute('class', 'vz-halo');
+      svg.appendChild(halo);
+      if (halo.animate) {
+        halo.animate([{ opacity: .9, transform: `translate(${c.x}px,${c.y}px) scale(.6)` },
+                      { opacity: 0, transform: `translate(${c.x}px,${c.y}px) scale(1.9)` }],
+          { duration: 1200, iterations: Infinity, easing: 'ease-out' });
+        halo.style.transformOrigin = `${-c.x}px ${-c.y}px`;
+        halo.setAttribute('cx', 0); halo.setAttribute('cy', 0);
+      }
+    }
+    if (fx.arc && centers[fx.arc[0]] && centers[fx.arc[1]]) {
+      const a = centers[fx.arc[0]], b = centers[fx.arc[1]];
+      const lift = Math.min(46, 14 + Math.abs(b.x - a.x) * 0.22);
+      const d = `M ${a.x} ${a.y - a.h / 2 - 4} Q ${(a.x + b.x) / 2} ${Math.min(a.y, b.y) - a.h / 2 - 4 - lift} ${b.x} ${b.y - b.h / 2 - 4}`;
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', d); path.setAttribute('class', 'vz-arc');
+      path.setAttribute('stroke', color);
+      svg.appendChild(path);
+      try {
+        const len = path.getTotalLength();
+        path.style.strokeDasharray = len;
+        path.style.strokeDashoffset = len;
+        if (path.animate) {
+          path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }],
+            { duration: 500, easing: 'ease-out', fill: 'forwards' });
+          if (fx.token) {
+            const dot = document.createElementNS(NS, 'circle');
+            dot.setAttribute('r', '5'); dot.setAttribute('class', 'vz-token-dot');
+            dot.setAttribute('fill', color);
+            svg.appendChild(dot);
+            const frames = [];
+            for (let k = 0; k <= 24; k++) {
+              const pt = path.getPointAtLength(len * k / 24);
+              frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)`, offset: k / 24 });
+            }
+            setTimeout(() => {
+              if (dot.animate) dot.animate(frames, { duration: 620, delay: 380, easing: 'ease-in-out', fill: 'forwards' });
+            }, 0);
+          }
+        }
+      } catch (e) { /* getTotalLength unavailable: static arc still shows */ }
+    }
   }
 
 
@@ -861,18 +1112,52 @@ CF.Visualizer = (() => {
       tick();
     }
 
+    /* ── AUTO-CHOREOGRAPHY (auto_diff in Manim terms) ──
+       When a step carries no hand-authored sceneFx, derive one from the
+       DELTA against the previous painted state: changed cells get rings,
+       moved pointers pulse toward their destination, everything outside
+       the delta dims. This means EVERY lesson trace animates coherently
+       even when its data never mentions animation at all. */
+    let lastPainted = null;
+    function autoFx(s) {
+      if (s.sceneFx) return s.sceneFx;
+      const prev = lastPainted;
+      const st = s.state || {};
+      if (!prev) return null;
+      const arr = st.arr || [], parr = prev.arr || [];
+      if (arr.length !== parr.length) return null; /* structural cut: no diff fx */
+      const changed = [];
+      for (let i = 0; i < arr.length; i++) if (String(arr[i]) !== String(parr[i])) changed.push(i);
+      const marksOn = [], marksOff = [];
+      const pm = prev.marks || {}, cm = st.marks || {};
+      Object.keys(cm).forEach(k => { if (cm[k] && cm[k] !== pm[k]) marksOn.push(Number(k)); });
+      const ptrMoved = [];
+      const pp = prev.ptrs || {}, cp = st.ptrs || {};
+      Object.keys(cp).forEach(id => { if (pp[id] != null && pp[id] !== cp[id]) ptrMoved.push({ id, from: pp[id], to: cp[id] }); });
+      const ring = [...new Set(changed.concat(marksOn).filter(n => !Number.isNaN(n)))].slice(0, 6);
+      if (!ring.length && !ptrMoved.length) return null;
+      const fx = { dim: true, ring, cells: ring };
+      if (ptrMoved.length) { fx.pulse = Math.max(0, Math.min(ptrMoved[0].to, arr.length - 1)); fx.color = '#22d3ee'; }
+      if (changed.length === 1 && s.fx && (s.fx.type === 'write' || s.fx.type === 'swap') && ptrMoved.length) {
+        fx.arc = [ptrMoved[0].from, changed[0]]; fx.token = true; /* value rides the pointer → cell */
+      }
+      return fx;
+    }
+
     function renderStep() {
       const s = steps[idx];
       if (!s) return;
-      /* plain state paint — every step renders its array/pointers instantly,
-         no tweened choreography (the animation layer was removed) */
-      renderScene(stage, s.state || { arr: [] });
+      const fxObj = autoFx(s);
+      renderScene(stage, s.state || { arr: [] }, { fx: fxObj });
+      lastPainted = s.state;
       container.querySelector('.vz-progress').textContent = `${idx + 1} / ${steps.length}`;
       codeEl.querySelectorAll('.vz-code-line').forEach(l =>
         l.classList.toggle('active', Number(l.dataset.line) === (s.line ?? -1)));
       cap.textContent = s.caption || '';
       cap.className = 'vz-caption' + (prefs.captions && s.narration ? ' full' : '');
       if (prefs.captions && s.narration) cap.textContent = s.narration;
+      /* caption re-entry pop — text changes deserve a soft arrival too */
+      if (cap.animate) cap.animate([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: 300, easing: 'ease-out' });
       if (s.fx && s.fx.type) {
         const arr = s.state?.arr || [];
         const numsA = arr.filter(x => typeof x === 'number');

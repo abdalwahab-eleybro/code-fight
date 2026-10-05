@@ -65,6 +65,7 @@ CF.Lessons = (() => {
     const steps = [];
     (script.steps || []).forEach((st) => {
       const s = { line: st.line ?? -1, caption: st.caption, narration: st.narration || '', state: st.state, fx: st.fx };
+      if (st.sceneFx) s.sceneFx = st.sceneFx; /* hand-authored choreography rides into the player */
       if (st.auxNote) s.auxNote = st.auxNote;
       if (st.choice && mode === 'watch') {
         s.predict = { q: st.choice.q, options: st.choice.options, correct: st.choice.correct, why: st.choice.why };
@@ -1820,24 +1821,24 @@ CF.Lessons = (() => {
     container.innerHTML = `
       <div class="lsn-wrap">
         ${phaseBar(session, 'Problem')}
-        <div class="lsn-hero">
+        <div class="lsn-hero lsn-anim-in">
           <div class="lsn-hero-icon">${ls.icon}</div>
           <div>
             <div class="lsn-hero-title">${esc(ls.title)}</div>
             <div class="lsn-hero-sub">${esc(ls.hookTitle)} · ${ls.minutes} min</div>
           </div>
         </div>
-        ${ls.imagine ? `<div class="lsn-imagine">
+        ${ls.imagine ? `<div class="lsn-imagine lsn-anim-in d1">
           <div class="lsn-imagine-word">Imagine…</div>
           <p class="lsn-imagine-text">${esc(ls.imagine.text)}</p>
           <div class="mt-stage" id="imagineScene"></div>
         </div>` : ''}
-        <div class="lsn-card plain">
+        <div class="lsn-card plain lsn-anim-in d2">
           <p class="lsn-hook">${esc(ls.hookText)}</p>
           <div class="lsn-obj-title">You will be able to:</div>
           <ul class="lsn-obj">${ls.objectives.map(o => `<li>${esc(o)}</li>`).join('')}</ul>
         </div>
-        <div class="lsn-nav">
+        <div class="lsn-nav lsn-anim-in d3">
           <button class="btn ghost" id="lsnQuit2">Quit</button>
           ${statusOf(ls.id) === 'done' ? '<button class="btn ghost" id="lsnJump">Replay from Watch ▶</button>' : ''}
           <button class="btn primary" id="lsnStart">Begin with the problem ▶</button>
@@ -1845,7 +1846,13 @@ CF.Lessons = (() => {
       </div>`;
     wireQuit(container, session);
     if (ls.imagine) {
-
+      /* LIVING INTRO: the imagine-scene plays a slow ambient loop — halo
+         pulse under the first pointer, rings on the cells the metaphor is
+         about. A still frame said nothing; this breathes. */
+      const iStage = container.querySelector('#imagineScene');
+      if (iStage && ls.imagine.scene) {
+        CF.Visualizer.renderScene(iStage, ls.imagine.scene, { fx: imagineFx(ls.imagine.scene) });
+      }
       CF.Narrator.speak('Imagine this. ' + ls.imagine.text + ' ' + ls.hookNarration);
     } else {
       CF.Narrator.speak(ls.hookNarration);
@@ -1856,6 +1863,18 @@ CF.Lessons = (() => {
       CF.Sonify.unlock();
       renderProblem(container, session);
     });
+  }
+
+  /* derive gentle choreography for a static "imagine" scene: ring the
+     already-marked cells, halo-pulse under the first pointer */
+  function imagineFx(scene) {
+    const fx = { dim: false, ring: [] };
+    const marks = scene.marks || {};
+    fx.ring = Object.keys(marks).map(Number).filter(n => !Number.isNaN(n)).slice(0, 6);
+    const p = scene.ptrs || {};
+    const first = Object.values(p)[0];
+    if (first != null) { fx.pulse = first; fx.color = '#22d3ee'; }
+    return (fx.ring.length || fx.pulse != null) ? fx : null;
   }
 
 
@@ -1906,8 +1925,18 @@ CF.Lessons = (() => {
         cell.addEventListener('click', () => {
           if (solved) return;
           const i = Number(cell.dataset.i);
-          if (sel.includes(i)) { sel = sel.filter(x => x !== i); }
+          const wasSelected = sel.includes(i);
+          if (wasSelected) { sel = sel.filter(x => x !== i); }
           else { sel.push(i); if (sel.length > 2) sel.shift(); }
+          /* TACTILE SPRING: the tapped tile answers with a bounce —
+             selection should feel like pressing a physical key */
+          if (cell.animate && !wasSelected) {
+            cell.animate([
+              { transform: 'scale(1)' }, { transform: 'scale(.86)', offset: .3 },
+              { transform: 'scale(1.08)', offset: .7 }, { transform: 'scale(1)' }
+            ], { duration: 340, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+            CF.Sonify.fx('init', {});
+          }
           if (freeMode) { paint('cmp'); aux.innerHTML = sel.length ? `Tapped ${sel.join(', ')} — keep exploring, then continue when you feel the shape of it.` : 'Explore: tap any cells.'; return; }
           evaluate();
         });
@@ -2203,7 +2232,7 @@ CF.Lessons = (() => {
     const note = (NEW_DATA.SHEET_NOTES || {})[id] || '';
     const wt = watchStepsFromIdea(sc);
     const mkWatch = () => buildTrace({ code: sc.codeMap.lines.map(l => l.code), steps: wt }, 'watch');
-    const mkDrive = () => buildTrace({ code: sc.codeMap.lines.map(l => l.code), steps: sc.idea.steps.map(st => ({ line: -1, caption: st.word, narration: st.text, state: st.state, fx: st.fx })) }, 'drive');
+    const mkDrive = () => buildTrace({ code: sc.codeMap.lines.map(l => l.code), steps: sc.idea.steps.map(st => ({ line: -1, caption: st.word, narration: st.text, state: st.state, fx: st.fx, sceneFx: st.sceneFx })) }, 'drive');
     return {
       id,
       pattern: id,
@@ -2456,7 +2485,16 @@ CF.Lessons = (() => {
       const st = idea.steps[i];
       guessEl.innerHTML = '';
       badge.textContent = st.word;
+      /* BADGE POP: the action word slams in with an overshoot bounce */
+      if (badge.animate) {
+        badge.animate([
+          { transform: 'scale(.4) rotate(-4deg)', opacity: 0 },
+          { transform: 'scale(1.12) rotate(1deg)', opacity: 1, offset: .6 },
+          { transform: 'scale(1) rotate(0)' }
+        ], { duration: 420, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+      }
       textEl.innerHTML = esc(st.text) + (st.why ? `<div class="lsn-idea-why">${esc(st.why)}</div>` : '');
+      if (textEl.animate) textEl.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 350, easing: 'ease-out' });
       CF.Narrator.speak(st.text + (st.why ? ' ' + st.why : ''));
       chips.querySelectorAll('.lsn-word-chip').forEach(c => {
         const k = Number(c.dataset.k);
@@ -2464,6 +2502,35 @@ CF.Lessons = (() => {
       });
       backBtn.disabled = i === 0;
       nextBtn.textContent = i === idea.steps.length - 1 ? 'Continue: trigger words ▶' : 'Next ▶';
+
+      /* LIVING IDEA STAGE: the mini-scene is animated by the SAME engine as
+         the Watch player — persistent cells, gliding pointers, and the
+         lesson's hand-authored sceneFx beats (rings / dim focus / arcs with
+         a value riding from pointer to cell). The Idea phase now shows the
+         exact motion the Watch phase will narrate. */
+      if (stage && st.state) {
+        const prevSt = i > 0 ? idea.steps[i - 1].state : null;
+        CF.Visualizer.renderScene(stage, st.state, { fx: st.sceneFx || diffFx(prevSt, st.state, st.fx) });
+      }
+    }
+
+    /* auto-diff choreography for the idea stage (mirrors the player's) */
+    function diffFx(prev, cur, sfx) {
+      if (!prev || !cur) return null;
+      const arr = cur.arr || [], parr = prev.arr || [];
+      if (arr.length !== parr.length) return null;
+      const changed = [];
+      for (let k = 0; k < arr.length; k++) if (String(arr[k]) !== String(parr[k])) changed.push(k);
+      const ring = [...new Set(changed.concat(Object.keys(cur.marks || {}).map(Number)).filter(n => !Number.isNaN(n)))].slice(0, 6);
+      const pp = prev.ptrs || {}, cp = cur.ptrs || {};
+      const moved = Object.keys(cp).filter(id => pp[id] != null && pp[id] !== cp[id]);
+      if (!ring.length && !moved.length) return null;
+      const fx = { dim: true, ring, cells: ring };
+      if (moved.length) { fx.pulse = Math.max(0, Math.min(cp[moved[0]], arr.length - 1)); fx.color = '#22d3ee'; }
+      if (changed.length === 1 && sfx && (sfx.type === 'write' || sfx.type === 'swap') && moved.length) {
+        fx.arc = [pp[moved[0]], changed[0]]; fx.token = true;
+      }
+      return fx;
     }
 
     /* retrieval practice: the stage still shows the previous state —
