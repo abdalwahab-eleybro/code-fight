@@ -63,16 +63,8 @@ CF.Lessons = (() => {
      the scripts table below — adding a lesson never touches this code. */
   function buildTrace(script, mode) {
     const steps = [];
-    let prevState = null; /* POLISH #9: diff-derived choreography for EVERY trace step */
-    (script.steps || []).forEach((st, i) => {
+    (script.steps || []).forEach((st) => {
       const s = { line: st.line ?? -1, caption: st.caption, narration: st.narration || '', state: st.state, fx: st.fx };
-      /* hand-authored sceneFx wins; otherwise derive it from what CHANGED
-         between this step and the last — rings on changed cells, an arc when
-         a pointer moved, dim elsewhere. This lifts every legacy hand-written
-         lesson (twoSum/minSubarray/prefix/primitives/f1 + brute traces) into
-         the same animated language as the sheet lessons. */
-      s.sceneFx = bespokeFx(st) || diffSceneFx(prevState, st.state);
-      prevState = st.state || prevState;
       if (st.auxNote) s.auxNote = st.auxNote;
       if (st.choice && mode === 'watch') {
         s.predict = { q: st.choice.q, options: st.choice.options, correct: st.choice.correct, why: st.choice.why };
@@ -1853,17 +1845,7 @@ CF.Lessons = (() => {
       </div>`;
     wireQuit(container, session);
     if (ls.imagine) {
-      /* 3b1b-style opener: the imagined world fades in first, then the
-         narrator paints it while a hand-authored Manim-style SVG scene
-         draws itself on screen (shapes ink in, elements glide, glowing
-         dots travel — see CF.Motion). */
-      const im = container.querySelector('.lsn-imagine');
-      requestAnimationFrame(() => im.classList.add('lit'));
-      try {
-        const host = container.querySelector('#imagineScene');
-        const spec = ls.imagine.motion || imagineMotion(ls.id, ls.imagine.scene);
-        if (host && spec && window.CF.Motion) CF.Motion.mountScene(host, spec);
-      } catch (e) { /* motion is decoration — never block the lesson */ }
+
       CF.Narrator.speak('Imagine this. ' + ls.imagine.text + ' ' + ls.hookNarration);
     } else {
       CF.Narrator.speak(ls.hookNarration);
@@ -1876,130 +1858,6 @@ CF.Lessons = (() => {
     });
   }
 
-  /* ── IMAGINE MOTION — hand-authored Manim-style SVG scenes ──
-     Each opener gets a bespoke CF.Motion spec: shapes ink themselves in,
-     elements glide on eased transforms, glowing dots travel paths.
-     Falls back to a generic "array + pointers" choreography for any
-     lesson without a bespoke scene (uses its imagine.scene data). */
-  const IMAGINE_MOTIONS = {
-    /* f1 · conveyor belt of letter tiles, two hands closing in */
-    f1: () => ({
-      viewBox: '0 0 640 240',
-      items: [
-        { id: 'belt', kind: 'path', d: 'M 40 150 L 600 150', stroke: '#334155', sw: 3, enter: 'draw', dur: 700 },
-        ...['p', 'y', 't', 'h', 'o', 'n'].map((c, i) => ({
-          id: 'tile' + i, kind: 'rect', x: 90 + i * 72, y: 96, w: 56, h: 56, rx: 10,
-          fill: 'rgba(148,163,184,.10)', stroke: '#64748b', sw: 2, enter: 'pop', delay: 300 + i * 120,
-          motion: { at: 1800 + i * 260, dur: 600, ease: 'bounce', props: { y: 96 } }
-        })),
-        ...['p', 'y', 't', 'h', 'o', 'n'].map((c, i) => ({
-          id: 'ch' + i, kind: 'text', x: 118 + i * 72, y: 132, text: c, size: 26, weight: 800,
-          anchor: 'middle', fill: '#e2e8f0', enter: 'fade', delay: 500 + i * 120
-        })),
-        { id: 'handL', kind: 'text', x: 118, y: 60, text: 'L ✋', size: 20, anchor: 'middle', fill: '#22d3ee', glow: '#22d3ee', enter: 'fade', delay: 1200,
-          motion: [{ at: 2600, dur: 900, props: { x: 262 } }, { at: 4200, dur: 900, props: { x: 334 } }] },
-        { id: 'handR', kind: 'text', x: 406, y: 60, text: '✋ R', size: 20, anchor: 'middle', fill: '#fb7185', glow: '#fb7185', enter: 'fade', delay: 1300,
-          motion: [{ at: 2600, dur: 900, props: { x: 262 } }, { at: 4200, dur: 900, props: { x: 190 } }] },
-        { id: 'swapArc', kind: 'arc', d: 'M 118 84 C 160 40 240 40 286 84', fill: 'none', stroke: '#fbbf24', sw: 2.5, opacity: .85, enter: 'draw', delay: 2400, dur: 800,
-          travel: { d: 'M 118 84 C 160 40 240 40 286 84', at: 2700, dur: 1100, color: '#fbbf24' } },
-        { id: 'cap', kind: 'text', x: 320, y: 210, text: 'grab one from each side · trade them · close in', size: 14, anchor: 'middle', fill: '#94a3b8', enter: 'fade', delay: 1600 }
-      ]
-    }),
-    /* p1 · two robots at the ends of a sorted shelf */
-    p1: () => ({
-      viewBox: '0 0 640 240',
-      defs: [{ id: 'shelfG', kind: 'linear', stops: [[0, '#22d3ee'], [1, '#a78bfa']] }],
-      items: [
-        { id: 'shelf', kind: 'rect', x: 60, y: 120, w: 520, h: 10, rx: 5, fill: '#334155', enter: 'draw', dur: 600 },
-        ...[2, 7, 11, 15].map((v, i) => ({
-          id: 'box' + i, kind: 'rect', x: 110 + i * 110, y: 60, w: 70, h: 58, rx: 8,
-          fill: 'rgba(148,163,184,.08)', stroke: 'url(#shelfG)', sw: 2, enter: 'pop', delay: 400 + i * 160
-        })),
-        ...[2, 7, 11, 15].map((v, i) => ({
-          id: 'num' + i, kind: 'text', x: 145 + i * 110, y: 97, text: v, size: 22, weight: 800, anchor: 'middle', fill: '#e2e8f0', enter: 'fade', delay: 560 + i * 160
-        })),
-        { id: 'botL', kind: 'circle', cx: 145, cy: 34, r: 11, fill: '#22d3ee', glow: '#22d3ee', enter: 'pop', delay: 1300,
-          motion: [{ at: 2400, dur: 1000, props: { cx: 255 } }, { at: 4300, dur: 1000, props: { cx: 365 } }] },
-        { id: 'botR', kind: 'circle', cx: 475, cy: 34, r: 11, fill: '#fb7185', glow: '#fb7185', enter: 'pop', delay: 1450,
-          motion: [{ at: 2400, dur: 1000, props: { cx: 365 } }] },
-        { id: 'sumTag', kind: 'text', x: 320, y: 190, text: '2 + 15 = 17 → too big → left robot quits forever', size: 14, anchor: 'middle', fill: '#94a3b8', enter: 'fade', delay: 2200,
-          motion: { at: 4400, dur: 500, props: { opacity: .0 } } },
-        { id: 'sumTag2', kind: 'text', x: 320, y: 190, text: '7 + 15 = 22 … 11 + 15 = 26 … every look retires a box', size: 14, anchor: 'middle', fill: '#fbbf24', enter: 'fade', delay: 4600 }
-      ]
-    }),
-    /* p4 · a lit window sliding over a dark street of cells */
-    p4: () => {
-      const cells = [2, 1, 5, 1, 3, 2];
-      return {
-        viewBox: '0 0 640 240',
-        items: [
-          ...cells.map((v, i) => ({
-            id: 'c' + i, kind: 'rect', x: 80 + i * 80, y: 90, w: 62, h: 62, rx: 10,
-            fill: 'rgba(148,163,184,.07)', stroke: '#475569', sw: 2, enter: 'pop', delay: 250 + i * 110
-          })),
-          ...cells.map((v, i) => ({
-            id: 'v' + i, kind: 'text', x: 111 + i * 80, y: 128, text: v, size: 20, weight: 800, anchor: 'middle', fill: '#cbd5e1', enter: 'fade', delay: 350 + i * 110
-          })),
-          { id: 'win', kind: 'rect', x: 76, y: 82, w: 174, h: 78, rx: 14, fill: 'rgba(251,191,36,.14)', stroke: '#fbbf24', sw: 2.5, glow: '#fbbf24', enter: 'fade', delay: 1200 },
-          { id: 'sumLbl', kind: 'text', x: 163, y: 56, text: 'k = 8?', size: 15, weight: 800, anchor: 'middle', fill: '#fbbf24', enter: 'fade', delay: 1400 },
-          ...[0, 1, 2, 3].map((s, i) => ({
-            id: 'slide' + i, _win: s, kind: 'rect', x: 76 + s * 80, y: 82, w: 174, h: 78, rx: 14,
-            fill: 'rgba(251,191,36,.14)', stroke: '#fbbf24', sw: 2.5, glow: '#fbbf24', opacity: 0,
-            motion: { at: 2000 + i * 1300, dur: 800, props: { opacity: 1 } }
-          })),
-          ...[0, 1, 2, 3].map((s, i) => ({
-            id: 'slbl' + i, kind: 'text', x: 163 + s * 80, y: 56, text: ['8 ✓', '9 ✗', '9 ✗', '6…'][i], size: 15, weight: 800, anchor: 'middle', fill: i === 0 ? '#4ade80' : '#94a3b8', opacity: 0,
-            motion: { at: 2200 + i * 1300, dur: 400, props: { opacity: 1 } }
-          })),
-          { id: 'grow', kind: 'arrow', x1: 250, y1: 190, x2: 330, y2: 190, stroke: '#4ade80', sw: 2.5, enter: 'draw', delay: 1800 },
-          { id: 'gcap', kind: 'text', x: 340, y: 195, text: 'right edge joins → sum grows · left edge leaves → sum shrinks', size: 13, anchor: 'start', fill: '#94a3b8', enter: 'fade', delay: 2000 }
-        ]
-      };
-    },
-    /* p6 · prefix sums as rising water behind each bar */
-    p6: () => ({
-      viewBox: '0 0 640 250',
-      defs: [{ id: 'water', kind: 'linear', stops: [[0, 'rgba(34,211,238,.7)'], [1, 'rgba(34,211,238,.15)']] }],
-      items: [
-        { id: 'floor', kind: 'path', d: 'M 50 190 L 600 190', stroke: '#334155', sw: 2, enter: 'draw', dur: 500 },
-        ...[3, 1, 4, 2, 5].map((v, i) => ({
-          id: 'bar' + i, kind: 'rect', x: 80 + i * 100, y: 190 - v * 16, w: 46, h: v * 16, rx: 4,
-          fill: 'rgba(148,163,184,.18)', stroke: '#64748b', sw: 1.5, enter: 'pop', delay: 300 + i * 130
-        })),
-        ...[3, 1, 4, 2, 5].map((v, i) => ({
-          id: 'wtr' + i, kind: 'rect', x: 80 + i * 100, y: 190, w: 46, h: 0, fill: 'url(#water)', opacity: .9,
-          motion: { at: 1600 + i * 420, dur: 700, ease: 'smooth', props: { y: 190 - [3, 4, 8, 10, 15][i] * 11, h: [3, 4, 8, 10, 15][i] * 11 } }
-        })),
-        ...[3, 4, 8, 10, 15].map((v, i) => ({
-          id: 'pl' + i, kind: 'text', x: 103 + i * 100, y: 190 - v * 11 - 8, text: String(v), size: 15, weight: 800, anchor: 'middle', fill: '#22d3ee', glow: '#22d3ee', opacity: 0,
-          motion: { at: 2000 + i * 420, dur: 400, props: { opacity: 1 } }
-        })),
-        { id: 'qcap', kind: 'text', x: 320, y: 34, text: 'range sum = tall water − short water   (one subtraction, zero walking)', size: 14, anchor: 'middle', fill: '#94a3b8', enter: 'fade', delay: 3600 }
-      ]
-    })
-  };
-
-  function imagineMotion(id, scene) {
-    if (IMAGINE_MOTIONS[id]) return IMAGINE_MOTIONS[id]();
-    /* generic fallback: animate the lesson's own imagine.scene array */
-    const arr = (scene && scene.arr) || [];
-    if (!arr.length) return null;
-    const n = Math.min(arr.length, 8);
-    const step = 480 / n;
-    const items = [];
-    arr.slice(0, n).forEach((v, i) => {
-      items.push({ id: 'g' + i, kind: 'rect', x: 80 + i * step, y: 100, w: step - 12, h: 60, rx: 8,
-        fill: 'rgba(148,163,184,.08)', stroke: '#64748b', sw: 2, enter: 'pop', delay: 250 + i * 110 });
-      items.push({ id: 'gv' + i, kind: 'text', x: 80 + i * step + (step - 12) / 2, y: 136, text: v, size: 18, weight: 800,
-        anchor: 'middle', fill: '#e2e8f0', enter: 'fade', delay: 350 + i * 110 });
-    });
-    Object.keys((scene && scene.ptrs) || {}).forEach((k, pi) => {
-      const idx = Math.min(scene.ptrs[k], n - 1);
-      items.push({ id: 'gp' + k, kind: 'text', x: 80 + idx * step + (step - 12) / 2, y: 72, text: k, size: 16, weight: 800,
-        anchor: 'middle', fill: pi ? '#fb7185' : '#22d3ee', glow: pi ? '#fb7185' : '#22d3ee', enter: 'fade', delay: 900 + pi * 200 });
-    });
-    return { viewBox: '0 0 640 220', items };
-  }
 
   function wireQuit(container, session) {
     const q = () => {
@@ -2043,7 +1901,7 @@ CF.Lessons = (() => {
     function paint(markClass) {
       const marks = {};
       sel.forEach(i => { marks[i] = markClass; });
-      CF.Visualizer.glideScene(stage, { arr: pb.arr, ptrs: {}, marks });
+      CF.Visualizer.renderScene(stage, { arr: pb.arr, ptrs: {}, marks });
       stage.querySelectorAll('.vz-cell').forEach(cell => {
         cell.addEventListener('click', () => {
           if (solved) return;
@@ -2283,17 +2141,6 @@ CF.Lessons = (() => {
   function watchStepsFromIdea(sc) {
     const steps = sc.idea.steps;
     const out = [];
-    /* POLISH #8: the intro step now carries its OWN choreography — a halo
-       pulse under the first in-play pointer plus rings on everything already
-       marked. The walkthrough opens with motion instead of a static frame. */
-    let firstRing = [], firstPulse = null;
-    for (const st of steps) {
-      const p = (st.state && st.state.ptrs) || {};
-      if (Object.keys(p).length) { firstPulse = Object.values(p)[0]; break; }
-    }
-    if (steps[0] && steps[0].state && steps[0].state.marks) {
-      firstRing = Object.keys(steps[0].state.marks).map(Number).filter(n => !Number.isNaN(n)).slice(0, 6);
-    }
     steps.forEach((st, i) => {
       const prev = i > 0 ? steps[i - 1].state : st.state;
       const intro = i === 0
@@ -2320,74 +2167,12 @@ CF.Lessons = (() => {
       const rev = { line: -1, caption: '→ ' + st.word, narration: st.word + '. ' + (st.why || st.text), state: st.state };
       if (st.fx) rev.fx = st.fx;
       if (st.sceneFx) rev.sceneFx = st.sceneFx; /* hand-authored beats auto-diff */
-      /* MANIM-STYLE CHOREOGRAPHY: derive sceneFx from the state DIFF between
-         this reveal and the previous one — changed cells get pulsing rings,
-         pointer moves draw a self-drawing arc with a travelling packet, and
-         everything outside the move dims into the background. */
-      rev.sceneFx = bespokeFx(st) || diffSceneFx(prev, st.state);
       out.push(rev);
     });
     return out;
   }
 
-  /* Bespoke choreography: lesson authors can attach st.sceneFx = { ring?, arc?:[from,to], glide?, token?, pulse?, dim?, color? }
-     to any idea step; those win over the auto-derived diff so a hand-timed
-     moment (the swap arc on pass 1, the window glow at discovery) always lands. */
-  function bespokeFx(st) {
-    const f = (st && st.sceneFx) || (st && typeof st.fx === 'object' && !st.fx.type ? st.fx : null);
-    if (!f || typeof f !== 'object' || f.type) return null; /* string fx = sonify only */
-    const fx = {};
-    if (f.ring) fx.cells = [].concat(f.ring);
-    if (f.arc && f.arc.length === 2) { fx.arc = true; fx.glide = !!f.glide; fx.token = !!f.token; fx.from = f.arc[0]; fx.to = f.arc[1]; }
-    if (f.pulse != null) fx.pulse = f.pulse;
-    if (f.color) fx.color = f.color;
-    fx.dim = f.dim !== false;
-    if (!fx.cells && !fx.arc && fx.pulse == null) return null;
-    if (fx.dim && !fx.cells && fx.arc) fx.cells = [];
-    return fx;
-  }
 
-  /* Compute a sceneFx descriptor by comparing two states (3b1b "what moved?"). */
-  function diffSceneFx(prev, cur) {
-    if (!cur || !Array.isArray(cur.arr)) return null;
-    const fx = {};
-    const changed = [];
-    const pArr = Array.isArray(prev && prev.arr) ? prev.arr : cur.arr;
-    cur.arr.forEach((v, i) => { if (pArr[i] !== v) changed.push(i); });
-    /* pointer movement → arc + glide between old and new index */
-    const pm = ['l', 'r', 'i', 'j', 'w', 'k', 'lo', 'hi', 'left', 'right', 'L', 'R'];
-    let arc = null;
-    if (prev && prev.ptrs && cur.ptrs) {
-      for (const k of pm) {
-        if (cur.ptrs[k] != null && prev.ptrs[k] != null && cur.ptrs[k] !== prev.ptrs[k]) {
-          arc = { from: prev.ptrs[k], to: cur.ptrs[k] }; break;
-        }
-      }
-    }
-    /* mark changes also count as "in play" */
-    const mkChanged = [];
-    const pMk = (prev && prev.marks) || {}, cMk = cur.marks || {};
-    cur.arr.forEach((_, i) => { if ((pMk[i] || '') !== (cMk[i] || '')) mkChanged.push(i); });
-    const cells = [...new Set([...changed, ...mkChanged])];
-    /* POLISH #6: one-pointer hops stay subtle — a plain gliding dot. A value
-       actually being carried (a cell's number changed) rides a labelled TOKEN
-       instead, which reads as "this number moved", not "a cursor twitched". */
-    if (arc) {
-      const carryIdx = changed.filter(i => i === arc.from || i === arc.to);
-      fx.arc = true; fx.from = arc.from; fx.to = arc.to;
-      fx.token = carryIdx.length > 0;
-      fx.glide = !fx.token;
-      if (fx.token) fx.color = '#fbbf24'; else fx.color = 'rgba(251,191,36,.75)';
-    }
-    if (cells.length) { fx.cells = cells.slice(0, 6); }
-    /* POLISH #7: no move detected → don't dim the whole board into the
-       background; a still frame deserves no choreography at all. */
-    if (arc || cells.length) { fx.dim = true; if (!fx.cells) fx.cells = []; }
-    if (arc && fx.cells) { /* keep arc endpoints bright too */
-      [fx.from, fx.to].forEach(i => { if (!fx.cells.includes(i)) fx.cells.push(i); });
-    }
-    return (fx.arc || fx.cells) ? fx : null;
-  }
 
   /* ── Skill-tree metadata for sheet lessons (tier = dependency depth) ── */
   const SHEET_META = {
@@ -2659,19 +2444,6 @@ CF.Lessons = (() => {
     function show() {
       const st = idea.steps[i];
       guessEl.innerHTML = '';
-      /* COHESION: the Idea phase now speaks the SAME choreography language as
-         Watch — rings on what changed, an arc when a pointer hops, dim on the
-         rest. Previously it only glided raw states, so the two phases looked
-         like different apps. */
-      const prevIdea = i > 0 ? idea.steps[i - 1].state : null;
-      const glided = CF.Visualizer.glideScene(stage, st.state);
-      stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
-      /* ONE choreographer for the whole app: the shared sceneFxLayer from
-         CF.Visualizer — identical rings/arcs/tokens/dimming as Watch mode.
-         (The old local `paintIdeaFx` copy never existed — every Idea-phase
-         annotation was silently swallowed by this try/catch.) */
-      try { CF.Visualizer.sceneFxLayer(stage, st, bespokeFx(st) || diffSceneFx(prevIdea, st.state), { glided }); } catch (e) {}
-      try { if (st.fx) CF.Sonify.fx(st.fx.type, { ...st.fx, arr: st.state?.arr || [] }); } catch (e) {}
       badge.textContent = st.word;
       textEl.innerHTML = esc(st.text) + (st.why ? `<div class="lsn-idea-why">${esc(st.why)}</div>` : '');
       CF.Narrator.speak(st.text + (st.why ? ' ' + st.why : ''));
@@ -3019,7 +2791,7 @@ CF.Lessons = (() => {
     const show = () => {
       if (k >= cm.lines.length) { btn.style.display = 'none'; return; }
       const l = cm.lines[k];
-      CF.Visualizer.glideScene(stage, ideaByWord[l.word] || { arr: [], ptrs: {}, marks: {} });
+      CF.Visualizer.renderScene(stage, ideaByWord[l.word] || { arr: [], ptrs: {}, marks: {} });
       codePre.innerHTML = cm.lines.map((x, i) =>
         `<span class="${i === k ? 'cam-on' : (i < k ? 'cam-done' : 'cam-off')}">${esc(x.code)}</span>`).join('\n');
       capEl.innerHTML = `<b>${esc(l.word)}</b> → <code>${esc(l.code)}</code> · ${esc(l.note)}`;
