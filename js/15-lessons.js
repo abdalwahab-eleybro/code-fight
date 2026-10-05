@@ -2301,10 +2301,25 @@ CF.Lessons = (() => {
          this reveal and the previous one — changed cells get pulsing rings,
          pointer moves draw a self-drawing arc with a travelling packet, and
          everything outside the move dims into the background. */
-      rev.sceneFx = diffSceneFx(prev, st.state);
+      rev.sceneFx = bespokeFx(st) || diffSceneFx(prev, st.state);
       out.push(rev);
     });
     return out;
+  }
+
+  /* Bespoke choreography: lesson authors can attach st.fx = { dim?, ring?, arc? }
+     to any idea step; those win over the auto-derived diff so a hand-timed
+     moment (the swap arc on pass 1, the window glow at discovery) always lands. */
+  function bespokeFx(st) {
+    const f = st && st.fx;
+    if (!f || typeof f !== 'object' || f.type) return null; /* string fx = sonify only */
+    const fx = {};
+    if (f.ring) fx.cells = [].concat(f.ring);
+    if (f.arc && f.arc.length === 2) { fx.arc = true; fx.glide = !!f.glide; fx.from = f.arc[0]; fx.to = f.arc[1]; }
+    fx.dim = f.dim !== false;
+    if (!fx.cells && !fx.arc) return null;
+    if (fx.dim && !fx.cells && fx.arc) fx.cells = [];
+    return fx;
   }
 
   /* Compute a sceneFx descriptor by comparing two states (3b1b "what moved?"). */
