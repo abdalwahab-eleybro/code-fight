@@ -65,6 +65,7 @@ CF.Lessons = (() => {
     const steps = [];
     (script.steps || []).forEach((st, i) => {
       const s = { line: st.line ?? -1, caption: st.caption, narration: st.narration || '', state: st.state, fx: st.fx };
+      if (st.sceneFx) s.sceneFx = st.sceneFx; /* manim-style choreography passthrough */
       if (st.auxNote) s.auxNote = st.auxNote;
       if (st.choice && mode === 'watch') {
         s.predict = { q: st.choice.q, options: st.choice.options, correct: st.choice.correct, why: st.choice.why };
@@ -2296,9 +2297,45 @@ CF.Lessons = (() => {
       out.push(s);
       const rev = { line: -1, caption: '→ ' + st.word, narration: st.word + '. ' + (st.why || st.text), state: st.state };
       if (st.fx) rev.fx = st.fx;
+      /* MANIM-STYLE CHOREOGRAPHY: derive sceneFx from the state DIFF between
+         this reveal and the previous one — changed cells get pulsing rings,
+         pointer moves draw a self-drawing arc with a travelling packet, and
+         everything outside the move dims into the background. */
+      rev.sceneFx = diffSceneFx(prev, st.state);
       out.push(rev);
     });
     return out;
+  }
+
+  /* Compute a sceneFx descriptor by comparing two states (3b1b "what moved?"). */
+  function diffSceneFx(prev, cur) {
+    if (!cur || !Array.isArray(cur.arr)) return null;
+    const fx = {};
+    const changed = [];
+    const pArr = Array.isArray(prev && prev.arr) ? prev.arr : cur.arr;
+    cur.arr.forEach((v, i) => { if (pArr[i] !== v) changed.push(i); });
+    /* pointer movement → arc + glide between old and new index */
+    const pm = ['l', 'r', 'i', 'j', 'w', 'k', 'lo', 'hi', 'left', 'right', 'L', 'R'];
+    let arc = null;
+    if (prev && prev.ptrs && cur.ptrs) {
+      for (const k of pm) {
+        if (cur.ptrs[k] != null && prev.ptrs[k] != null && cur.ptrs[k] !== prev.ptrs[k]) {
+          arc = { from: prev.ptrs[k], to: cur.ptrs[k] }; break;
+        }
+      }
+    }
+    /* mark changes also count as "in play" */
+    const mkChanged = [];
+    const pMk = (prev && prev.marks) || {}, cMk = cur.marks || {};
+    cur.arr.forEach((_, i) => { if ((pMk[i] || '') !== (cMk[i] || '')) mkChanged.push(i); });
+    const cells = [...new Set([...changed, ...mkChanged])];
+    if (arc) { fx.arc = true; fx.glide = true; fx.from = arc.from; fx.to = arc.to; }
+    if (cells.length) { fx.cells = cells.slice(0, 6); }
+    if (arc || cells.length) { fx.dim = true; if (!fx.cells) fx.cells = []; }
+    if (arc && fx.cells) { /* keep arc endpoints bright too */
+      [fx.from, fx.to].forEach(i => { if (!fx.cells.includes(i)) fx.cells.push(i); });
+    }
+    return (fx.arc || fx.cells) ? fx : null;
   }
 
   /* ── Skill-tree metadata for sheet lessons (tier = dependency depth) ── */

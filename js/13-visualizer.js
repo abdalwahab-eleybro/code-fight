@@ -1290,6 +1290,7 @@ CF.Visualizer = (() => {
          changed; a structural jump (step-back, loop edge, re-init) hard-cuts
          with a quick fade instead of freezing mid-animation. */
       glideScene(stage, s.state || { arr: [] });
+      sceneFx(s); /* manim-style focus/rings/arcs, layered on the fresh scene */
       container.querySelector('.vz-progress').textContent = `${idx + 1} / ${steps.length}`;
       codeEl.querySelectorAll('.vz-code-line').forEach(l =>
         l.classList.toggle('active', Number(l.dataset.line) === (s.line ?? -1)));
@@ -1306,6 +1307,86 @@ CF.Visualizer = (() => {
           valueHi: numsA.length ? Math.max.apply(null, numsA) : 1
         });
       }
+      /* MANIM-STYLE CHOREOGRAPHY per step (data-driven, opt-in via s.sceneFx):
+         · dim   — every cell not part of this move fades back (focus shift)
+         · ring  — glow rings pulse on the named cells (Transform highlighting)
+         · arc   — a curved arrow draws itself between two cells (swap/move)
+         · glide — travelling packet rides the arc (the "hand" carrying values)
+         Without sceneFx the old behaviour is untouched: marks only. */
+      function sceneFx(s) {
+        const fx = s.sceneFx;
+        const cells = Array.from(stage.querySelectorAll('.vz-cell'));
+        cells.forEach(c => { c.classList.remove('vz-dim', 'vz-ring'); });
+        stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
+        if (!fx) return;
+        const mainRow = stage.querySelector('.vz-row');
+        if (!mainRow) return;
+        if (fx.dim) {
+          const keep = new Set([].concat(fx.cells || [], fx.from || [], fx.to || []));
+          cells.forEach(c => { if (!keep.has(Number(c.dataset.i))) c.classList.add('vz-dim'); });
+        }
+        if (fx.cells) {
+          fx.cells.forEach(i => {
+            const c = cells.filter(x => Number(x.dataset.i) === i)[0];
+            if (c) c.classList.add('vz-ring');
+          });
+        }
+        if (fx.arc && fx.from != null && fx.to != null) {
+          const a = cells.filter(x => Number(x.dataset.i) === fx.from)[0];
+          const b = cells.filter(x => Number(x.dataset.i) === fx.to)[0];
+          if (!a || !b) return;
+          const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          svg.setAttribute('class', 'vz-fx-svg');
+          svg.style.left = '0'; svg.style.top = '0';
+          svg.width = stage.clientWidth || 640; svg.height = stage.clientHeight || 220;
+          const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+          const rs = stage.getBoundingClientRect();
+          const x1 = ra.left - rs.left + ra.width / 2, y1 = ra.top - rs.top;
+          const x2 = rb.left - rs.left + rb.width / 2, y2 = rb.top - rs.top;
+          const mx = (x1 + x2) / 2, lift = Math.max(34, Math.min(90, Math.abs(x2 - x1) * .38));
+          const d = `M ${x1} ${y1} Q ${mx} ${Math.min(y1, y2) - lift} ${x2} ${y2}`;
+          const col = fx.color || '#fbbf24';
+          const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+          const mid = 'fxm' + (++fxUid);
+          const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+          marker.setAttribute('id', mid); marker.setAttribute('viewBox', '0 0 10 10');
+          marker.setAttribute('refX', 8); marker.setAttribute('refY', 5);
+          marker.setAttribute('markerWidth', 7); marker.setAttribute('markerHeight', 7);
+          marker.setAttribute('orient', 'auto-start-reverse');
+          const mp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          mp.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); mp.setAttribute('fill', col);
+          marker.appendChild(mp); defs.appendChild(marker); svg.appendChild(defs);
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', d); path.setAttribute('fill', 'none');
+          path.setAttribute('stroke', col); path.setAttribute('stroke-width', 2.5);
+          path.setAttribute('opacity', .9); path.setAttribute('marker-end', `url(#${mid})`);
+          svg.appendChild(path);
+          try {
+            const len = path.getTotalLength();
+            path.style.strokeDasharray = len; path.style.strokeDashoffset = len;
+            path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }],
+              { duration: 800, delay: 150, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
+          } catch (e) {}
+          if (fx.glide) {
+            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            dot.setAttribute('r', 5.5); dot.setAttribute('cx', x1); dot.setAttribute('cy', y1);
+            dot.setAttribute('fill', col); svg.appendChild(dot);
+            setTimeout(() => {
+              try {
+                const frames = [];
+                for (let i = 0; i <= 30; i++) {
+                  const pt = path.getPointAtLength(len * i / 30);
+                  frames.push({ transform: `translate(${pt.x - x1}px, ${pt.y - y1}px)` });
+                }
+                dot.animate(frames, { duration: 1100, delay: 350, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
+              } catch (e) {}
+            }, 200);
+          }
+          stage.appendChild(svg);
+        }
+      }
+      let fxUid = 0;
+
       CF.Narrator.setRate(prefs.speed || 1);
       CF.Narrator.speak(s.narration || s.caption || '');
       /* VOICE-LOCKED CHECKPOINTS: the lesson shell (Watch/Brute phases) used

@@ -65,6 +65,18 @@
   /* hard-cut fade when the scene structurally re-lays out (3b1b-style continuity) */
   @keyframes vz-cut { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   .vz-stage.vz-cut > * { animation: vz-cut .35s ease both; }
+
+  /* ── MANIM-STYLE CHOREOGRAPHY (sceneFx layer, data-driven per step) ── */
+  /* focus shift: everything not part of this move fades back */
+  .vz-cell.vz-dim { opacity: .28; filter: saturate(.4); transition: opacity .3s, filter .3s; }
+  /* Transform highlighting: glow ring pulses on the cells in play */
+  .vz-cell.vz-ring { border-color: var(--gold); animation: vz-ring-pulse 1.3s cubic-bezier(.4,0,.2,1) 2; }
+  @keyframes vz-ring-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(251,191,36,.0); }
+    35%      { box-shadow: 0 0 0 7px rgba(251,191,36,.28), 0 0 22px rgba(251,191,36,.5); }
+  }
+  /* self-drawing arc + travelling packet ride above the cells */
+  .vz-fx-svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; overflow: visible; }
   .vz-row.small { margin-top: 0; }
   .vz-row.small .vz-cell { min-width: 36px; height: 34px; border-radius: 8px; }
   .vz-row.small .vz-val { font-size: 12px; }
