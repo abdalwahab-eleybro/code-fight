@@ -63,9 +63,16 @@ CF.Lessons = (() => {
      the scripts table below — adding a lesson never touches this code. */
   function buildTrace(script, mode) {
     const steps = [];
+    let prevState = null; /* POLISH #9: diff-derived choreography for EVERY trace step */
     (script.steps || []).forEach((st, i) => {
       const s = { line: st.line ?? -1, caption: st.caption, narration: st.narration || '', state: st.state, fx: st.fx };
-      if (st.sceneFx) s.sceneFx = st.sceneFx; /* manim-style choreography passthrough */
+      /* hand-authored sceneFx wins; otherwise derive it from what CHANGED
+         between this step and the last — rings on changed cells, an arc when
+         a pointer moved, dim elsewhere. This lifts every legacy hand-written
+         lesson (twoSum/minSubarray/prefix/primitives/f1 + brute traces) into
+         the same animated language as the sheet lessons. */
+      s.sceneFx = bespokeFx(st) || diffSceneFx(prevState, st.state);
+      prevState = st.state || prevState;
       if (st.auxNote) s.auxNote = st.auxNote;
       if (st.choice && mode === 'watch') {
         s.predict = { q: st.choice.q, options: st.choice.options, correct: st.choice.correct, why: st.choice.why };
@@ -2276,12 +2283,27 @@ CF.Lessons = (() => {
   function watchStepsFromIdea(sc) {
     const steps = sc.idea.steps;
     const out = [];
+    /* POLISH #8: the intro step now carries its OWN choreography — a halo
+       pulse under the first in-play pointer plus rings on everything already
+       marked. The walkthrough opens with motion instead of a static frame. */
+    let firstRing = [], firstPulse = null;
+    for (const st of steps) {
+      const p = (st.state && st.state.ptrs) || {};
+      if (Object.keys(p).length) { firstPulse = Object.values(p)[0]; break; }
+    }
+    if (steps[0] && steps[0].state && steps[0].state.marks) {
+      firstRing = Object.keys(steps[0].state.marks).map(Number).filter(n => !Number.isNaN(n)).slice(0, 6);
+    }
     steps.forEach((st, i) => {
       const prev = i > 0 ? steps[i - 1].state : st.state;
       const intro = i === 0
         ? 'Here is the whole run, one move at a time. ' + st.text
         : 'This is where we stand now. ' + st.text;
       const s = { line: -1, caption: st.word, narration: intro, state: prev };
+      if (i === 0 && (firstPulse != null || firstRing.length)) {
+        s.sceneFx = { dim: false, cells: firstRing };
+        if (firstPulse != null) { s.sceneFx.pulse = firstPulse; s.sceneFx.color = '#22d3ee'; }
+      }
       if (i < steps.length - 1) {
         const nxt = steps[i + 1];
         const words = [...new Set(steps.slice(i + 1).map(x => x.word))].slice(0, 3);
@@ -2308,7 +2330,7 @@ CF.Lessons = (() => {
     return out;
   }
 
-  /* Bespoke choreography: lesson authors can attach st.fx = { dim?, ring?, arc? }
+  /* Bespoke choreography: lesson authors can attach st.sceneFx = { ring?, arc?:[from,to], glide?, token?, pulse?, dim?, color? }
      to any idea step; those win over the auto-derived diff so a hand-timed
      moment (the swap arc on pass 1, the window glow at discovery) always lands. */
   function bespokeFx(st) {
@@ -2316,9 +2338,11 @@ CF.Lessons = (() => {
     if (!f || typeof f !== 'object' || f.type) return null; /* string fx = sonify only */
     const fx = {};
     if (f.ring) fx.cells = [].concat(f.ring);
-    if (f.arc && f.arc.length === 2) { fx.arc = true; fx.glide = !!f.glide; fx.from = f.arc[0]; fx.to = f.arc[1]; }
+    if (f.arc && f.arc.length === 2) { fx.arc = true; fx.glide = !!f.glide; fx.token = !!f.token; fx.from = f.arc[0]; fx.to = f.arc[1]; }
+    if (f.pulse != null) fx.pulse = f.pulse;
+    if (f.color) fx.color = f.color;
     fx.dim = f.dim !== false;
-    if (!fx.cells && !fx.arc) return null;
+    if (!fx.cells && !fx.arc && fx.pulse == null) return null;
     if (fx.dim && !fx.cells && fx.arc) fx.cells = [];
     return fx;
   }
@@ -2345,8 +2369,19 @@ CF.Lessons = (() => {
     const pMk = (prev && prev.marks) || {}, cMk = cur.marks || {};
     cur.arr.forEach((_, i) => { if ((pMk[i] || '') !== (cMk[i] || '')) mkChanged.push(i); });
     const cells = [...new Set([...changed, ...mkChanged])];
-    if (arc) { fx.arc = true; fx.glide = true; fx.from = arc.from; fx.to = arc.to; }
+    /* POLISH #6: one-pointer hops stay subtle — a plain gliding dot. A value
+       actually being carried (a cell's number changed) rides a labelled TOKEN
+       instead, which reads as "this number moved", not "a cursor twitched". */
+    if (arc) {
+      const carryIdx = changed.filter(i => i === arc.from || i === arc.to);
+      fx.arc = true; fx.from = arc.from; fx.to = arc.to;
+      fx.token = carryIdx.length > 0;
+      fx.glide = !fx.token;
+      if (fx.token) fx.color = '#fbbf24'; else fx.color = 'rgba(251,191,36,.75)';
+    }
     if (cells.length) { fx.cells = cells.slice(0, 6); }
+    /* POLISH #7: no move detected → don't dim the whole board into the
+       background; a still frame deserves no choreography at all. */
     if (arc || cells.length) { fx.dim = true; if (!fx.cells) fx.cells = []; }
     if (arc && fx.cells) { /* keep arc endpoints bright too */
       [fx.from, fx.to].forEach(i => { if (!fx.cells.includes(i)) fx.cells.push(i); });

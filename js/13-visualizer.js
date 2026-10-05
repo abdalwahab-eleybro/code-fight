@@ -859,10 +859,31 @@ CF.Visualizer = (() => {
       const cell = cells[i];
       if (!cell) return;
       const valEl = cell.querySelector('.vz-val');
-      if (valEl && String(valEl.textContent) !== String(v)) valEl.textContent = v;
+      /* POLISH #3: the number itself morphs (scale-flip) when it changes —
+         Manim's Transform(value) gesture instead of a silent text swap */
+      if (valEl && String(valEl.textContent) !== String(v)) {
+        valEl.textContent = v;
+        try {
+          valEl.animate([{ transform: 'scale(.4)', opacity: .25 },
+                         { transform: 'scale(1.18)', opacity: 1, offset: .7 },
+                         { transform: 'scale(1)', opacity: 1 }],
+            { duration: 420, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+        } catch (e) {}
+      }
       const mk = state.marks?.[i] || state.marks?.[String(i)] || '';
       const want = 'vz-cell' + (mk ? ' ' + mk : '');
-      if (cell.className !== want) cell.className = want;
+      if (cell.className !== want) {
+        /* POLISH #4: a mark turning ON pops the cell border/glow in with a
+           quick scale bounce instead of appearing instantly */
+        const wasDimmed = cell.classList.contains('vz-dim');
+        cell.className = want;
+        if (!wasDimmed && mk) {
+          try {
+            cell.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.09)' }, { transform: 'scale(1)' }],
+              { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+          } catch (e) {}
+        }
+      }
       let frac = 0.6;
       if (typeof v === 'number') frac = hi > lo ? (v - lo) / (hi - lo) : 0.6;
       const hpx = Math.round(28 + frac * 54);
@@ -876,23 +897,46 @@ CF.Visualizer = (() => {
     /* pointers: reuse the layer — positionPointers slides existing tags */
     if (prev.ptrLayer) positionPointers(prev.ptrLayer, prev.mainRow, state.ptrs || {}, arr.length);
 
-    /* aux chips: rebuild only when the numbers actually changed */
+    /* aux chips: rebuild only when the numbers actually changed.
+       POLISH #5: if the row already exists, update values IN PLACE and pop
+       any chip whose value changed — the old full-rebuild made the whole
+       chip row blink out-and-back on every single step. */
     const auxKey = JSON.stringify(state.aux || []);
     if (auxKey !== (stage._vzAuxKey || '')) {
       stage._vzAuxKey = auxKey;
-      const old = stage.querySelector('.vz-aux');
-      if (old) old.remove();
-      if (state.aux && state.aux.length) {
-        const aux = document.createElement('div');
-        aux.className = 'vz-aux';
-        state.aux.forEach(a => {
-          const chip = document.createElement('span');
-          chip.className = 'vz-aux-chip';
-          chip.innerHTML = `<b>${esc(a.label)}</b> ${esc(a.value)}`;
-          aux.appendChild(chip);
+      const existing = stage.querySelector('.vz-aux');
+      if (existing && state.aux && state.aux.length === existing.children.length) {
+        state.aux.forEach((a, i) => {
+          const chip = existing.children[i];
+          const bEl = chip.querySelector('b');
+          const wantTxt = `<b>${esc(a.label)}</b> ${esc(a.value)}`;
+          if (chip.innerHTML !== wantTxt) {
+            const oldVal = chip.textContent.replace(bEl ? bEl.textContent : '', '').trim();
+            chip.innerHTML = wantTxt;
+            if (oldVal !== String(a.value).trim()) {
+              try {
+                chip.animate([{ transform: 'scale(.82)', opacity: .4 },
+                              { transform: 'scale(1.07)', offset: .65 },
+                              { transform: 'scale(1)', opacity: 1 }],
+                  { duration: 380, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+              } catch (e) {}
+            }
+          }
         });
-        const r2w = stage.querySelector('.vz-row2-wrap');
-        if (r2w) stage.insertBefore(aux, r2w); else stage.appendChild(aux);
+      } else {
+        if (existing) existing.remove();
+        if (state.aux && state.aux.length) {
+          const aux = document.createElement('div');
+          aux.className = 'vz-aux';
+          state.aux.forEach(a => {
+            const chip = document.createElement('span');
+            chip.className = 'vz-aux-chip';
+            chip.innerHTML = `<b>${esc(a.label)}</b> ${esc(a.value)}`;
+            aux.appendChild(chip);
+          });
+          const r2w = stage.querySelector('.vz-row2-wrap');
+          if (r2w) stage.insertBefore(aux, r2w); else stage.appendChild(aux);
+        }
       }
     }
 
@@ -939,10 +983,26 @@ CF.Visualizer = (() => {
           const cell = r2cells[i];
           if (!cell) return;
           const valEl = cell.querySelector('.vz-val');
-          if (valEl && String(valEl.textContent) !== String(v)) valEl.textContent = v;
+          if (valEl && String(valEl.textContent) !== String(v)) {
+            valEl.textContent = v;
+            try {
+              valEl.animate([{ transform: 'scale(.4)', opacity: .25 },
+                             { transform: 'scale(1.18)', opacity: 1, offset: .7 },
+                             { transform: 'scale(1)', opacity: 1 }],
+                { duration: 420, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+            } catch (e) {}
+          }
           const mk = state.row2.marks?.[i] || state.row2.marks?.[String(i)] || '';
           const want = 'vz-cell ' + (mk || '');
-          if (cell.className !== want) cell.className = want;
+          if (cell.className !== want) {
+            cell.className = want;
+            if (mk) {
+              try {
+                cell.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.09)' }, { transform: 'scale(1)' }],
+                  { duration: 320, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+              } catch (e) {}
+            }
+          }
         });
         const p2 = stage.querySelector('.vz-row2-wrap + .vz-ptrs') ||
                    [...stage.children].filter(c => c.classList.contains('vz-ptrs')).pop();
@@ -974,7 +1034,7 @@ CF.Visualizer = (() => {
      Falls back to a full rebuild on structural changes. Shared by the
      player AND the mini stages (idea phase, problem phase). ── */
   function glideScene(stage, state) {
-    if (!state) return;
+    if (!state) return false;
     const arr = state.arr || [];
     const prev = stage._vzState;
     const sameShape = prev && prev.mainRow && stage.contains(prev.mainRow) &&
@@ -982,18 +1042,19 @@ CF.Visualizer = (() => {
       JSON.stringify(prev.row2Arr || []) === JSON.stringify((state.row2 && state.row2.arr) || prev.row2Arr || []);
     if (sameShape) {
       animateScene(stage, state);
-    } else {
-      stage.classList.remove('vz-cut');
-      void stage.offsetWidth; /* restart the keyframe */
-      renderScene(stage, state);
-      stage._vzState = {
-        arr: arr.slice(),
-        row2Arr: state.row2 ? (state.row2.arr || []).slice() : null,
-        mainRow: stage.querySelector('.vz-row'),
-        ptrLayer: stage.querySelector('.vz-ptrs')
-      };
-      stage.classList.add('vz-cut');
+      return true; /* tweened — callers must wait for it to land */
     }
+    stage.classList.remove('vz-cut');
+    void stage.offsetWidth; /* restart the keyframe */
+    renderScene(stage, state);
+    stage._vzState = {
+      arr: arr.slice(),
+      row2Arr: state.row2 ? (state.row2.arr || []).slice() : null,
+      mainRow: stage.querySelector('.vz-row'),
+      ptrLayer: stage.querySelector('.vz-ptrs')
+    };
+    stage.classList.add('vz-cut');
+    return false;
   }
 
   /* ── SCENE RENDER (shared by watch / drive modes) ── */
@@ -1011,10 +1072,16 @@ CF.Visualizer = (() => {
     const lo = Math.min.apply(null, nums.length ? nums : [0]);
     const hi = Math.max.apply(null, nums.length ? nums : [1]);
 
+    /* POLISH A: long rows shrink their cells to fit the stage instead of
+       overflowing into a scrollbar — positions stay measurable for arcs and
+       the whole array is visible at once (Manim frames every object). */
+    const availW = (stage.clientWidth || 640) - 8;
+    const wide = Math.max(30, Math.min(46, Math.floor(availW / Math.max(1, arr.length)) - 6));
     arr.forEach((v, i) => {
       const cell = document.createElement('div');
       const mk = state.marks?.[i] || state.marks?.[String(i)] || '';
       cell.className = 'vz-cell' + (mk ? ' ' + mk : '');
+      if (wide < 46) cell.style.width = wide + 'px';
       cell.dataset.i = i;
       let frac = 0.6;
       if (typeof v === 'number') frac = hi > lo ? (v - lo) / (hi - lo) : 0.6;
@@ -1289,8 +1356,9 @@ CF.Visualizer = (() => {
       /* 3b1b-style motion: the scene GLIDES when only values/marks/pointers
          changed; a structural jump (step-back, loop edge, re-init) hard-cuts
          with a quick fade instead of freezing mid-animation. */
-      glideScene(stage, s.state || { arr: [] });
-      sceneFx(s); /* manim-style focus/rings/arcs, layered on the fresh scene */
+      const glided = glideScene(stage, s.state || { arr: [] });
+      stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
+      sceneFx(s, glided); /* manim-style focus/rings/arcs, layered on the fresh scene */
       container.querySelector('.vz-progress').textContent = `${idx + 1} / ${steps.length}`;
       codeEl.querySelectorAll('.vz-code-line').forEach(l =>
         l.classList.toggle('active', Number(l.dataset.line) === (s.line ?? -1)));
@@ -1312,8 +1380,10 @@ CF.Visualizer = (() => {
          · ring  — glow rings pulse on the named cells (Transform highlighting)
          · arc   — a curved arrow draws itself between two cells (swap/move)
          · glide — travelling packet rides the arc (the "hand" carrying values)
+                   …or an animated value TOKEN flies cell→cell when token set
+         · pulse — a soft expanding halo under one cell (window/center growth)
          Without sceneFx the old behaviour is untouched: marks only. */
-      function sceneFx(s) {
+      function sceneFx(s, glided) {
         const fx = s.sceneFx;
         const cells = Array.from(stage.querySelectorAll('.vz-cell'));
         cells.forEach(c => { c.classList.remove('vz-dim', 'vz-ring'); });
@@ -1321,8 +1391,13 @@ CF.Visualizer = (() => {
         if (!fx) return;
         const mainRow = stage.querySelector('.vz-row');
         if (!mainRow) return;
+        /* POLISH #1: never measure mid-glide. Cells and pointers are still
+           CSS-transitioning to their new spots for ~450 ms after a glide —
+           arcs drawn now start/end at stale coordinates and visibly detach
+           from the cells they point at. Wait until the tween lands. */
+        const DELAY = glided ? 480 : 60;
         if (fx.dim) {
-          const keep = new Set([].concat(fx.cells || [], fx.from || [], fx.to || []));
+          const keep = new Set([].concat(fx.cells || [], fx.from != null ? [fx.from] : [], fx.to != null ? [fx.to] : []));
           cells.forEach(c => { if (!keep.has(Number(c.dataset.i))) c.classList.add('vz-dim'); });
         }
         if (fx.cells) {
@@ -1331,59 +1406,138 @@ CF.Visualizer = (() => {
             if (c) c.classList.add('vz-ring');
           });
         }
-        if (fx.arc && fx.from != null && fx.to != null) {
-          const a = cells.filter(x => Number(x.dataset.i) === fx.from)[0];
-          const b = cells.filter(x => Number(x.dataset.i) === fx.to)[0];
-          if (!a || !b) return;
+        const wantArc = fx.arc && fx.from != null && fx.to != null;
+        const wantToken = fx.token && fx.from != null && fx.to != null;
+        if (!wantArc && !wantToken && !fx.pulse) return;
+        setTimeout(() => {
+          if (destroyed) return;
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
           svg.setAttribute('class', 'vz-fx-svg');
           svg.style.left = '0'; svg.style.top = '0';
           svg.width = stage.clientWidth || 640; svg.height = stage.clientHeight || 220;
-          const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
           const rs = stage.getBoundingClientRect();
-          const x1 = ra.left - rs.left + ra.width / 2, y1 = ra.top - rs.top;
-          const x2 = rb.left - rs.left + rb.width / 2, y2 = rb.top - rs.top;
-          const mx = (x1 + x2) / 2, lift = Math.max(34, Math.min(90, Math.abs(x2 - x1) * .38));
-          const d = `M ${x1} ${y1} Q ${mx} ${Math.min(y1, y2) - lift} ${x2} ${y2}`;
-          const col = fx.color || '#fbbf24';
-          const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-          const mid = 'fxm' + (++fxUid);
-          const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-          marker.setAttribute('id', mid); marker.setAttribute('viewBox', '0 0 10 10');
-          marker.setAttribute('refX', 8); marker.setAttribute('refY', 5);
-          marker.setAttribute('markerWidth', 7); marker.setAttribute('markerHeight', 7);
-          marker.setAttribute('orient', 'auto-start-reverse');
-          const mp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-          mp.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); mp.setAttribute('fill', col);
-          marker.appendChild(mp); defs.appendChild(marker); svg.appendChild(defs);
-          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-          path.setAttribute('d', d); path.setAttribute('fill', 'none');
-          path.setAttribute('stroke', col); path.setAttribute('stroke-width', 2.5);
-          path.setAttribute('opacity', .9); path.setAttribute('marker-end', `url(#${mid})`);
-          svg.appendChild(path);
-          try {
-            const len = path.getTotalLength();
-            path.style.strokeDasharray = len; path.style.strokeDashoffset = len;
-            path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }],
-              { duration: 800, delay: 150, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
-          } catch (e) {}
-          if (fx.glide) {
-            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            dot.setAttribute('r', 5.5); dot.setAttribute('cx', x1); dot.setAttribute('cy', y1);
-            dot.setAttribute('fill', col); svg.appendChild(dot);
-            setTimeout(() => {
+          const liveCells = Array.from(stage.querySelectorAll('.vz-row > .vz-cell'));
+          const centerOf = (i, bottom) => {
+            const c = liveCells.filter(x => Number(x.dataset.i) === i)[0];
+            if (!c) return null;
+            const r = c.getBoundingClientRect();
+            return { x: r.left - rs.left + r.width / 2, y: (bottom ? r.bottom : r.top) - rs.top };
+          };
+          let path = null, len = 0, p1 = null, p2 = null;
+          if (wantArc || wantToken) {
+            p1 = centerOf(fx.from); p2 = centerOf(fx.to);
+            if (p1 && p2) {
+              const col = fx.color || '#fbbf24';
+              const mx = (p1.x + p2.x) / 2, lift = Math.max(34, Math.min(90, Math.abs(p2.x - p1.x) * .38));
+              const d = `M ${p1.x} ${p1.y} Q ${mx} ${Math.min(p1.y, p2.y) - lift} ${p2.x} ${p2.y}`;
+              const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+              const mid = 'fxm' + (++fxUid);
+              const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+              marker.setAttribute('id', mid); marker.setAttribute('viewBox', '0 0 10 10');
+              marker.setAttribute('refX', 8); marker.setAttribute('refY', 5);
+              marker.setAttribute('markerWidth', 7); marker.setAttribute('markerHeight', 7);
+              marker.setAttribute('orient', 'auto-start-reverse');
+              const mp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+              mp.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); mp.setAttribute('fill', col);
+              marker.appendChild(mp); defs.appendChild(marker); svg.appendChild(defs);
+              path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+              path.setAttribute('d', d); path.setAttribute('fill', 'none');
+              if (wantArc) {
+                path.setAttribute('stroke', col); path.setAttribute('stroke-width', 2.5);
+                path.setAttribute('opacity', .9); path.setAttribute('marker-end', `url(#${mid})`);
+              } else {
+                path.setAttribute('stroke', col); path.setAttribute('stroke-width', 1.5);
+                path.setAttribute('opacity', .45); path.setAttribute('stroke-dasharray', '3 5');
+              }
+              svg.appendChild(path);
               try {
-                const frames = [];
-                for (let i = 0; i <= 30; i++) {
-                  const pt = path.getPointAtLength(len * i / 30);
-                  frames.push({ transform: `translate(${pt.x - x1}px, ${pt.y - y1}px)` });
+                len = path.getTotalLength();
+                path.style.strokeDasharray = wantArc ? len : '3 5';
+                path.style.strokeDashoffset = wantArc ? len : 0;
+                if (wantArc) {
+                  path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }],
+                    { duration: 700, delay: 0, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
                 }
-                dot.animate(frames, { duration: 1100, delay: 350, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
               } catch (e) {}
-            }, 200);
+            }
+          }
+          /* value TOKEN: a labelled chip that physically carries the number
+             from cell to cell along the arc — Manim's Transform(Mobject) look */
+          if (wantToken && path && len) {
+            const v = (s.state && Array.isArray(s.state.arr)) ? s.state.arr[fx.from] : '';
+            const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', -13); rect.setAttribute('y', -12);
+            rect.setAttribute('width', 26); rect.setAttribute('height', 24);
+            rect.setAttribute('rx', 7);
+            rect.setAttribute('fill', fx.color || '#fbbf24');
+            rect.setAttribute('opacity', '.95');
+            const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('dy', 5);
+            txt.setAttribute('font-size', '13'); txt.setAttribute('font-weight', '800');
+            txt.setAttribute('font-family', 'ui-monospace, Menlo, monospace');
+            txt.setAttribute('fill', '#0a0e1a');
+            txt.textContent = String(v == null ? '' : v).slice(0, 3);
+            g.appendChild(rect); g.appendChild(txt);
+            g.style.transform = `translate(${p1.x}px, ${p1.y}px)`;
+            svg.appendChild(g);
+            const frames = [];
+            for (let k = 0; k <= 36; k++) {
+              const pt = path.getPointAtLength(len * k / 36);
+              frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)` });
+            }
+            try {
+              g.animate(frames, { duration: 1000, delay: 250, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
+              rect.animate([{ opacity: .95 }, { opacity: .95 }, { opacity: 0 }],
+                { duration: 1250, delay: 250, easing: 'ease-in', fill: 'forwards' });
+              txt.animate([{ opacity: .95 }, { opacity: .95 }, { opacity: 0 }],
+                { duration: 1250, delay: 250, easing: 'ease-in', fill: 'forwards' });
+            } catch (e) {}
+          } else if (fx.glide && path && len) {
+            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            dot.setAttribute('r', 5.5); dot.setAttribute('cx', 0); dot.setAttribute('cy', 0);
+            dot.setAttribute('fill', fx.color || '#fbbf24');
+            dot.style.transform = `translate(${p1.x}px, ${p1.y}px)`;
+            svg.appendChild(dot);
+            const frames = [];
+            for (let k = 0; k <= 36; k++) {
+              const pt = path.getPointAtLength(len * k / 36);
+              frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)` });
+            }
+            try {
+              dot.animate(frames, { duration: 1000, delay: 250, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
+            } catch (e) {}
+          }
+          /* pulse: expanding halo under a cell — window growth, palindrome centers */
+          if (fx.pulse != null) {
+            const pc = centerOf(fx.pulse, true);
+            if (pc) {
+              const halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+              halo.setAttribute('cx', pc.x); halo.setAttribute('cy', pc.y - 23);
+              halo.setAttribute('r', 16); halo.setAttribute('fill', 'none');
+              halo.setAttribute('stroke', fx.color || '#22d3ee');
+              halo.setAttribute('stroke-width', 2);
+              svg.appendChild(halo);
+              try {
+                halo.animate([{ r: 14, opacity: .8 }, { r: 46, opacity: 0 }],
+                  { duration: 1100, delay: 100, easing: 'cubic-bezier(.2,.6,.3,1)', iterations: 2 });
+              } catch (e) {
+                halo.animate([{ transform: 'scale(1)', opacity: .8 }, { transform: 'scale(3)', opacity: 0 }],
+                  { duration: 1100, delay: 100, easing: 'cubic-bezier(.2,.6,.3,1)', iterations: 2 });
+              }
+            }
           }
           stage.appendChild(svg);
-        }
+          /* POLISH #2: arcs are momentary annotations — fade them out so the
+             next step never inherits ghost arrows from the previous one */
+          setTimeout(() => {
+            try {
+              svg.animate([{ opacity: 1 }, { opacity: 0 }],
+                { duration: 450, delay: 2400, easing: 'ease-out', fill: 'forwards' });
+              setTimeout(() => { if (svg.parentNode) svg.remove(); }, 3100);
+            } catch (e) { try { svg.remove(); } catch (e2) {} }
+          }, 0);
+        }, DELAY);
       }
       let fxUid = 0;
 
