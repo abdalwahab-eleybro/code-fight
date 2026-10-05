@@ -135,30 +135,44 @@ CF.Motion = (() => {
     if (t.length) n.style.transform = t.join(' ');
   }
 
-  function runMotion(node, m, it) {
-    /* animate position/size props via attributes; transform props via WAAPI */
-    const to = {};
-    const p = m.props || {};
-    if (p.x != null) to.x = p.x;
-    if (p.y != null) to.y = p.y;
+  /* which geometry attributes a motion prop maps onto */
+  function motionTargets(it, m) {
+    const p = m.props || {}, to = {};
+    const isCircleish = it.kind === 'circle' || it.cx != null;
+    if (p.x != null) to[isCircleish ? 'cx' : 'x'] = p.x;
+    if (p.y != null) to[isCircleish ? 'cy' : 'y'] = p.y;
+    if (p.cx != null) to.cx = p.cx;
+    if (p.cy != null) to.cy = p.cy;
     if (p.w != null) to.width = p.w;
     if (p.h != null) to.height = p.h;
     if (p.r != null) to.r = p.r;
     if (p.opacity != null) to.opacity = p.opacity;
+    return to;
+  }
+
+  /* COHESION FIX: one timeline per scene. Previously every item scheduled
+     its own independent setTimeout — re-mounts stacked duplicate timers and
+     nothing could be cancelled on cleanup. Now mountScene owns a single
+     scheduler; play() restarts the choreography from t = 0. */
+  function scheduleMotion(host, node, m, it) {
+    const to = motionTargets(it, m);
     const dur = m.dur || 900;
     const easing = m.ease === 'bounce' ? EASE_POP : EASE;
+    const timers = [];
     const start = () => {
       if (Object.keys(to).length && node.animate) {
-        const frames = [{}];
-        const end = {};
+        const from = {}, end = {};
         for (const k in to) {
           const cur = parseFloat(node.getAttribute(k)) || 0;
-          frames[0][k] = cur; end[k] = to[k];
+          from[k] = cur; end[k] = to[k];
         }
-        try { node.animate([frames[0], end], { duration: dur, easing, fill: 'forwards' }); }
+        try { node.animate([from, end], { duration: dur, easing, fill: 'forwards' }); }
         catch (e) { /* attribute fallback below */ }
-        setTimeout(() => { for (const k in to) node.setAttribute(k, to[k]); }, dur + 30);
+        timers.push(setTimeout(() => {
+          for (const k in to) node.setAttribute(k, to[k]);
+        }, dur + 30));
       }
+      const p = m.props || {};
       if (p.scale != null || p.rotate != null) {
         const nextIt = Object.assign({}, it, p);
         const before = node.style.transform || 'none';
@@ -169,34 +183,73 @@ CF.Motion = (() => {
         }
       }
     };
-    if (m.at != null) setTimeout(start, m.at); else start();
+    if (m.at != null) host._mtTimers.push(setTimeout(start, m.at));
+    else start();
   }
 
-  function mountScene(el, spec) {
-    if (!spec || !spec.items) return null;
-    const svgId = 'sc' + (++uid);
-    el.innerHTML = '';
-    const svg = mk('svg', {
-      viewBox: spec.viewBox || '0 0 640 260',
-      class: 'mt-svg', preserveAspectRatio: 'xMidYMid meet'
-    });
-    const defs = mk('defs', {});
+  /* render the whole scene into `el`. `host` carries the per-scene timer
+     list so every scheduled beat lives on one cancellable timeline. */
+  function paintScene(host, el, spec) {
+    const svgId = host.svgId;
+    const nodes = {};   /* persists across re-paints: stable DOM identity */
+    let freshSvg = false;
+    if (!host.svg || !el.contains(host.svg)) {
+      el.innerHTML = '';
+      host.svg = mk('svg', {
+        viewBox: spec.viewBox || '0 0 640 260',
+        class: 'mt-svg', preserveAspectRatio: 'xMidYMid meet'
+      });
+      host.defs = mk('defs', {});
+      /* faint 3b1b grid backdrop */
+      const pat = mk('pattern', { id: 'mt-grid-' + svgId, width: 28, height: 28, patternUnits: 'userSpaceOnUse' });
+      pat.appendChild(mk('path', { d: 'M 28 0 L 0 0 0 28', fill: 'none', stroke: 'rgba(148,163,184,.08)', 'stroke-width': 1 }));
+      host.defs.appendChild(pat);
+      host.svg.appendChild(host.defs);
+      host.svg.appendChild(mk('rect', { x: 0, y: 0, width: '100%', height: '100%', fill: `url(#mt-grid-${svgId})` }));
+      el.appendChild(host.svg);
+      freshSvg = true;
+    }
+    const svg = host.svg, defs = host.defs;
+    svg.setAttribute('viewBox', spec.viewBox || '0 0 640 260');
+
     (spec.defs || []).forEach(d => {
+      if (defs.querySelector('#' + d.id)) return;
       const g = mk(d.kind === 'radial' ? 'radialGradient' : 'linearGradient', { id: d.id });
       (d.stops || []).forEach(s =>
         g.appendChild(mk('stop', { offset: s[0], 'stop-color': s[1], 'stop-opacity': s[2] != null ? s[2] : 1 })));
       defs.appendChild(g);
     });
-    /* faint 3b1b grid backdrop */
-    const pat = mk('pattern', { id: 'mt-grid-' + svgId, width: 28, height: 28, patternUnits: 'userSpaceOnUse' });
-    pat.appendChild(mk('path', { d: 'M 28 0 L 0 0 0 28', fill: 'none', stroke: 'rgba(148,163,184,.08)', 'stroke-width': 1 }));
-    defs.appendChild(pat);
-    svg.appendChild(defs);
-    svg.appendChild(mk('rect', { x: 0, y: 0, width: '100%', height: '100%', fill: `url(#mt-grid-${svgId})` }));
 
-    const nodes = {};
     spec.items.forEach(it => {
-      const n = makeItem(it, defs, svgId);
+      let n = nodes[it.id];
+      const existing = !freshSvg && n && svg.contains(n) ? n : null;
+      if (existing) {
+        /* GLIDE FIX: the node already exists — tween its geometry to the new
+           values instead of rebuilding the scene (no flicker, no hard cuts) */
+        const to = motionTargets(it, { props: it });
+        const from = {};
+        for (const k in to) from[k] = parseFloat(existing.getAttribute(k)) || 0;
+        if (Object.keys(to).length && existing.animate) {
+          try {
+            existing.animate([from, to], { duration: it.dur || 500, easing: EASE, fill: 'forwards' });
+          } catch (e) {}
+          setTimeout(() => { for (const k in to) existing.setAttribute(k, to[k]); }, (it.dur || 500) + 30);
+        } else {
+          for (const k in to) existing.setAttribute(k, to[k]);
+        }
+        if (it.text != null && existing.textContent !== String(it.text)) {
+          existing.textContent = String(it.text);
+          try {
+            existing.animate([{ opacity: .25 }, { opacity: 1 }],
+              { duration: 300, easing: EASE, fill: 'forwards' });
+          } catch (e) {}
+        }
+        place(existing, it);
+        nodes[it.id] = existing;
+        return;
+      }
+
+      n = makeItem(it, defs, svgId);
       n.setAttribute('data-mt', it.id || ('i' + (++uid)));
       place(n, it);
       svg.appendChild(n);
@@ -227,9 +280,9 @@ CF.Motion = (() => {
         else n.style.opacity = it.opacity != null ? it.opacity : 1;
       }
 
-      /* scheduled motions */
+      /* scheduled motions — all on the single scene timeline */
       (Array.isArray(it.motion) ? it.motion : it.motion ? [it.motion] : [])
-        .forEach(m => runMotion(n, m, it));
+        .forEach(m => scheduleMotion(host, n, m, it));
 
       /* travelling dot along a path (flow packets) */
       if (it.travel) {
@@ -253,16 +306,46 @@ CF.Motion = (() => {
             dot.animate(frames, { duration: tr.dur || 1400, easing: EASE, iterations: tr.loop ? Infinity : 1 });
           } catch (e) {}
         };
-        setTimeout(go, tr.at || 0);
+        host._mtTimers.push(setTimeout(go, tr.at || 0));
       }
     });
 
-    el.appendChild(svg);
-    return {
-      svg,
-      node: (id) => nodes[id],
-      setMotion: (id, m) => { const it = spec.items.find(i => i.id === id); if (nodes[id] && it) runMotion(nodes[id], m, it); }
+    host.nodes = nodes;
+  }
+
+  function mountScene(el, spec) {
+    if (!el || !spec || !spec.items) return null;
+    /* COHESION FIX: re-mounting the same host restarts that scene's timeline
+       instead of stacking a second set of duplicate timers on top of it. */
+    if (el._mtHost && typeof el._mtHost.stop === 'function') el._mtHost.stop();
+    const host = {
+      svgId: 'sc' + (++uid),
+      _mtTimers: [],
+      svg: null,
+      defs: null,
+      nodes: {},
+      play() {
+        /* restart the choreography from t = 0 on a fresh copy of the spec,
+           so replaying never inherits half-finished tweens from before */
+        host._mtTimers.forEach(clearTimeout);
+        host._mtTimers = [];
+        let fresh = spec;
+        try { fresh = JSON.parse(JSON.stringify(spec)); } catch (e) {}
+        paintScene(host, el, fresh);
+      },
+      stop() {
+        host._mtTimers.forEach(clearTimeout);
+        host._mtTimers = [];
+      },
+      setMotion(id, m) {
+        const node = host.nodes[id];
+        const it = (spec.items || []).find(i => i.id === id);
+        if (node && it) scheduleMotion(host, node, m, it);
+      }
     };
+    paintScene(host, el, spec);
+    el._mtHost = host;
+    return host;
   }
 
   return { mountScene };
@@ -1183,6 +1266,171 @@ CF.Visualizer = (() => {
     });
   }
 
+  /* ── SCENE FX — the shared Manim-style annotation layer ──
+     dim / ring / self-drawing arc / travelling packet or value token / pulse.
+     Used by the step player AND by the lesson phases (Idea, Two-Cameras),
+     so every surface of the app speaks one visual language instead of
+     several. `stage` must be position:relative with .vz-cell elements that
+     carry data-i. Returns nothing; all timers are self-cleaning. */
+  let fxSeq = 0;   /* invalidates half-finished overlays from earlier steps */
+  let fxUid = 0;   /* unique ids for per-arc arrowhead markers */
+  function sceneFxLayer(stage, s, fx, opts) {
+    const glided = !!(opts && opts.glided);
+    const seq = ++fxSeq;
+    const cells = Array.from(stage.querySelectorAll('.vz-cell'));
+    cells.forEach(c => { c.classList.remove('vz-dim', 'vz-ring'); });
+    stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
+    if (!fx || !stage.querySelector('.vz-row')) return;
+    /* POLISH #1: never measure mid-glide. Cells and pointers are still
+       CSS-transitioning to their new spots for ~450 ms after a glide —
+       arcs drawn now start/end at stale coordinates and visibly detach
+       from the cells they point at. Wait until the tween lands. */
+    const DELAY = glided ? 480 : 60;
+    if (fx.dim) {
+      const keep = new Set([].concat(fx.cells || [], fx.from != null ? [fx.from] : [], fx.to != null ? [fx.to] : []));
+      cells.forEach(c => { if (!keep.has(Number(c.dataset.i))) c.classList.add('vz-dim'); });
+    }
+    if (fx.cells) {
+      fx.cells.forEach(i => {
+        const c = cells.filter(x => Number(x.dataset.i) === i)[0];
+        if (c) c.classList.add('vz-ring');
+      });
+    }
+    const wantArc = fx.arc && fx.from != null && fx.to != null;
+    const wantToken = fx.token && fx.from != null && fx.to != null;
+    if (!wantArc && !wantToken && fx.pulse == null) return;
+    setTimeout(() => {
+      if (seq !== fxSeq || !document.contains(stage)) return; /* a newer paint won */
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'vz-fx-svg');
+      svg.style.left = '0'; svg.style.top = '0';
+      svg.width = stage.clientWidth || 640; svg.height = stage.clientHeight || 220;
+      const rs = stage.getBoundingClientRect();
+      const liveCells = Array.from(stage.querySelectorAll('.vz-row > .vz-cell'));
+      const centerOf = (i, bottom) => {
+        const c = liveCells.filter(x => Number(x.dataset.i) === i)[0];
+        if (!c) return null;
+        const r = c.getBoundingClientRect();
+        return { x: r.left - rs.left + r.width / 2, y: (bottom ? r.bottom : r.top) - rs.top };
+      };
+      let path = null, len = 0, p1 = null, p2 = null;
+      if (wantArc || wantToken) {
+        p1 = centerOf(fx.from); p2 = centerOf(fx.to);
+        if (p1 && p2) {
+          const col = fx.color || '#fbbf24';
+          const mx = (p1.x + p2.x) / 2, lift = Math.max(34, Math.min(90, Math.abs(p2.x - p1.x) * .38));
+          const d = `M ${p1.x} ${p1.y} Q ${mx} ${Math.min(p1.y, p2.y) - lift} ${p2.x} ${p2.y}`;
+          const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+          const mid = 'fxm' + (++fxUid);
+          const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+          marker.setAttribute('id', mid); marker.setAttribute('viewBox', '0 0 10 10');
+          marker.setAttribute('refX', 8); marker.setAttribute('refY', 5);
+          marker.setAttribute('markerWidth', 7); marker.setAttribute('markerHeight', 7);
+          marker.setAttribute('orient', 'auto-start-reverse');
+          const mp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          mp.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); mp.setAttribute('fill', col);
+          marker.appendChild(mp); defs.appendChild(marker); svg.appendChild(defs);
+          path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', d); path.setAttribute('fill', 'none');
+          if (wantArc) {
+            path.setAttribute('stroke', col); path.setAttribute('stroke-width', 2.5);
+            path.setAttribute('opacity', .9); path.setAttribute('marker-end', `url(#${mid})`);
+          } else {
+            path.setAttribute('stroke', col); path.setAttribute('stroke-width', 1.5);
+            path.setAttribute('opacity', .45); path.setAttribute('stroke-dasharray', '3 5');
+          }
+          svg.appendChild(path);
+          try {
+            len = path.getTotalLength();
+            path.style.strokeDasharray = wantArc ? len : '3 5';
+            path.style.strokeDashoffset = wantArc ? len : 0;
+            if (wantArc) {
+              path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }],
+                { duration: 700, delay: 0, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
+            }
+          } catch (e) {}
+        }
+      }
+      /* value TOKEN: a labelled chip that physically carries the number
+         from cell to cell along the arc — Manim's Transform(Mobject) look */
+      if (wantToken && path && len) {
+        const v = (s && s.state && Array.isArray(s.state.arr)) ? s.state.arr[fx.from] : '';
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', -13); rect.setAttribute('y', -12);
+        rect.setAttribute('width', 26); rect.setAttribute('height', 24);
+        rect.setAttribute('rx', 7);
+        rect.setAttribute('fill', fx.color || '#fbbf24');
+        rect.setAttribute('opacity', '.95');
+        const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('dy', 5);
+        txt.setAttribute('font-size', '13'); txt.setAttribute('font-weight', '800');
+        txt.setAttribute('font-family', 'ui-monospace, Menlo, monospace');
+        txt.setAttribute('fill', '#0a0e1a');
+        txt.textContent = String(v == null ? '' : v).slice(0, 3);
+        g.appendChild(rect); g.appendChild(txt);
+        g.style.transform = `translate(${p1.x}px, ${p1.y}px)`;
+        svg.appendChild(g);
+        const frames = [];
+        for (let k = 0; k <= 36; k++) {
+          const pt = path.getPointAtLength(len * k / 36);
+          frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)` });
+        }
+        try {
+          g.animate(frames, { duration: 1000, delay: 250, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
+          rect.animate([{ opacity: .95 }, { opacity: .95 }, { opacity: 0 }],
+            { duration: 1250, delay: 250, easing: 'ease-in', fill: 'forwards' });
+          txt.animate([{ opacity: .95 }, { opacity: .95 }, { opacity: 0 }],
+            { duration: 1250, delay: 250, easing: 'ease-in', fill: 'forwards' });
+        } catch (e) {}
+      } else if (fx.glide && path && len) {
+        const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        dot.setAttribute('r', 5.5); dot.setAttribute('cx', 0); dot.setAttribute('cy', 0);
+        dot.setAttribute('fill', fx.color || '#fbbf24');
+        dot.style.transform = `translate(${p1.x}px, ${p1.y}px)`;
+        svg.appendChild(dot);
+        const frames = [];
+        for (let k = 0; k <= 36; k++) {
+          const pt = path.getPointAtLength(len * k / 36);
+          frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)` });
+        }
+        try {
+          dot.animate(frames, { duration: 1000, delay: 250, easing: 'cubic-bezier(.45,.05,.35,1)', fill: 'forwards' });
+        } catch (e) {}
+      }
+      /* pulse: expanding halo under a cell — window growth, palindrome centers */
+      if (fx.pulse != null) {
+        const pc = centerOf(fx.pulse, true);
+        if (pc) {
+          const halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          halo.setAttribute('cx', pc.x); halo.setAttribute('cy', pc.y - 23);
+          halo.setAttribute('r', 16); halo.setAttribute('fill', 'none');
+          halo.setAttribute('stroke', fx.color || '#22d3ee');
+          halo.setAttribute('stroke-width', 2);
+          svg.appendChild(halo);
+          try {
+            halo.animate([{ r: 14, opacity: .8 }, { r: 46, opacity: 0 }],
+              { duration: 1100, delay: 100, easing: 'cubic-bezier(.2,.6,.3,1)', iterations: 2 });
+          } catch (e) {
+            halo.animate([{ transform: 'scale(1)', opacity: .8 }, { transform: 'scale(3)', opacity: 0 }],
+              { duration: 1100, delay: 100, easing: 'cubic-bezier(.2,.6,.3,1)', iterations: 2 });
+          }
+        }
+      }
+      stage.appendChild(svg);
+      /* POLISH #2: arcs are momentary annotations — fade them out so the
+         next step never inherits ghost arrows from the previous one */
+      setTimeout(() => {
+        if (seq !== fxSeq || !document.contains(svg)) { try { svg.remove(); } catch (e) {} return; }
+        try {
+          svg.animate([{ opacity: 1 }, { opacity: 0 }],
+            { duration: 450, delay: 2400, easing: 'ease-out', fill: 'forwards' });
+          setTimeout(() => { if (svg.parentNode) svg.remove(); }, 3100);
+        } catch (e) { try { svg.remove(); } catch (e2) {} }
+      }, 0);
+    }, DELAY);
+  }
+
   /* ── PLAYER ── */
   function createPlayer(opts) {
     /* suppressOverlay: the lesson shell can render its own checkpoint UI
@@ -1383,8 +1631,11 @@ CF.Visualizer = (() => {
                    …or an animated value TOKEN flies cell→cell when token set
          · pulse — a soft expanding halo under one cell (window/center growth)
          Without sceneFx the old behaviour is untouched: marks only. */
+      let fxSeq = 0;
+      let fxUid = 0; /* unique ids for the per-arc arrowhead markers */
       function sceneFx(s, glided) {
         const fx = s.sceneFx;
+        const seq = ++fxSeq; /* invalidates arcs still in flight from earlier steps */
         const cells = Array.from(stage.querySelectorAll('.vz-cell'));
         cells.forEach(c => { c.classList.remove('vz-dim', 'vz-ring'); });
         stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
@@ -1410,7 +1661,7 @@ CF.Visualizer = (() => {
         const wantToken = fx.token && fx.from != null && fx.to != null;
         if (!wantArc && !wantToken && !fx.pulse) return;
         setTimeout(() => {
-          if (destroyed) return;
+          if (destroyed || seq !== fxSeq) return; /* a newer step already painted */
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
           svg.setAttribute('class', 'vz-fx-svg');
           svg.style.left = '0'; svg.style.top = '0';
@@ -1531,6 +1782,7 @@ CF.Visualizer = (() => {
           /* POLISH #2: arcs are momentary annotations — fade them out so the
              next step never inherits ghost arrows from the previous one */
           setTimeout(() => {
+            if (destroyed || seq !== fxSeq) { try { svg.remove(); } catch (e) {} return; }
             try {
               svg.animate([{ opacity: 1 }, { opacity: 0 }],
                 { duration: 450, delay: 2400, easing: 'ease-out', fill: 'forwards' });
@@ -1539,7 +1791,6 @@ CF.Visualizer = (() => {
           }, 0);
         }, DELAY);
       }
-      let fxUid = 0;
 
       CF.Narrator.setRate(prefs.speed || 1);
       CF.Narrator.speak(s.narration || s.caption || '');

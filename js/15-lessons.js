@@ -2659,7 +2659,14 @@ CF.Lessons = (() => {
     function show() {
       const st = idea.steps[i];
       guessEl.innerHTML = '';
-      CF.Visualizer.glideScene(stage, st.state);
+      /* COHESION: the Idea phase now speaks the SAME choreography language as
+         Watch — rings on what changed, an arc when a pointer hops, dim on the
+         rest. Previously it only glided raw states, so the two phases looked
+         like different apps. */
+      const prevIdea = i > 0 ? idea.steps[i - 1].state : null;
+      const glided = CF.Visualizer.glideScene(stage, st.state);
+      stage.querySelectorAll('.vz-fx-svg').forEach(n => n.remove());
+      try { paintIdeaFx(stage, st, bespokeFx(st) || diffSceneFx(prevIdea, st.state), glided); } catch (e) {}
       try { if (st.fx) CF.Sonify.fx(st.fx.type, { ...st.fx, arr: st.state?.arr || [] }); } catch (e) {}
       badge.textContent = st.word;
       textEl.innerHTML = esc(st.text) + (st.why ? `<div class="lsn-idea-why">${esc(st.why)}</div>` : '');
