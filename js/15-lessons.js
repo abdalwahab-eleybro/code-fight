@@ -23,6 +23,13 @@ CF.Lessons = (() => {
   const R = CF.Renderers;
   const AI = CF.AITutor;
 
+  /* ── Sheet lessons bridge (js/15b-lesson-content.js — pure DATA) ──
+     Every study-sheet lesson lives there as data only. Here we just
+     bridge it in and generate the interactive phases from that data,
+     so adding or editing a lesson NEVER touches engine code. */
+  const NEW_DATA = (window.CF && window.CF.NEW_LESSONS) || { SCRIPTS: {}, SHEET_NOTES: {} };
+  const NEW_SCRIPTS = NEW_DATA.SCRIPTS;
+
   /* ── XP ledger (prediction market) ──
      Wagering needs real stakes: we debit the stake at match time and credit
      winnings when the round settles. If the learner has no coins, the round
@@ -2092,6 +2099,50 @@ CF.Lessons = (() => {
     box.appendChild(svgHost);
     mountEl.appendChild(box);
     CF.Flow.mountFlow(svgHost, LSN_FLOWS[lsId] || (NEW_SCRIPTS[lsId] && NEW_SCRIPTS[lsId].flow));
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  SHEET-LESSON FACTORY — builds a full playable lesson   */
+  /*  from the pure-DATA scripts in js/15b-lesson-content.js. */
+  /*  Watch / Drive / Practice phases all come from the same  */
+  /*  narrated trace; checkpoints ride along as data choices. */
+  /* ═══════════════════════════════════════════════════════ */
+  function makeSheetLesson(id, sc) {
+    const note = (NEW_DATA.SHEET_NOTES || {})[id] || '';
+    const mkTrace = () => buildTrace({ code: sc.watchCode || [], steps: sc.watch || [] }, 'watch');
+    return {
+      id,
+      icon: sc.icon || '🧠',
+      title: sc.title || id,
+      minutes: sc.minutes || 10,
+      hookTitle: sc.hookTitle,
+      hookText: sc.hookText + (note ? '\n\n📋 ' + note : ''),
+      hookNarration: sc.hookNarration,
+      imagine: sc.imagine,
+      objectives: sc.objectives || [
+        'Watch the pattern run on small input and predict every move before it happens',
+        'Drive the pointers yourself on fresh input until the moves feel automatic',
+        'Name the trigger words that announce this pattern in a new problem',
+        'Spot where the pattern breaks — and say why in your own words'
+      ],
+      problem: sc.problem,
+      sheetNote: note,
+      brute: sc.brute,
+      idea: sc.idea,
+      triggers: sc.triggers,
+      codeMap: sc.codeMap,
+      recognize: sc.recognize,
+      watch: mkTrace,
+      drive: mkTrace,
+      practice: mkTrace,
+      bug: sc.bug || null,
+      misconceptionCard: sc.misconceptionCard || null,
+      invariant: sc.invariant,
+      proof: sc.proof || null,
+      explain: sc.explain,
+      fightLabel: sc.fightLabel || ('Lessons · ' + (sc.title || id)),
+      bugTrap: sc.bugTrap || null
+    };
   }
 
   /* ── PHASE 2 · BRUTE-FORCE LAB — feel the cost ── */
