@@ -1,0 +1,120 @@
+{
+  "patterns": [
+    {
+      "id": "p1",
+      "name": "Converging",
+      "volume": 1
+    },
+    {
+      "id": "p2",
+      "name": "Read-Write",
+      "volume": 1
+    },
+    {
+      "id": "p3",
+      "name": "Backwards Write",
+      "volume": 1
+    },
+    {
+      "id": "p4",
+      "name": "Sliding Window",
+      "volume": 1
+    },
+    {
+      "id": "p5",
+      "name": "Two-Array Merge",
+      "volume": 1
+    },
+    {
+      "id": "p6",
+      "name": "Prefix Sum",
+      "volume": 1
+    },
+    {
+      "id": "p7",
+      "name": "Kadane",
+      "volume": 1
+    },
+    {
+      "id": "guard",
+      "name": "Guarded Skipping",
+      "volume": 1
+    },
+    {
+      "id": "x1",
+      "name": "Three Pointers",
+      "volume": 1
+    },
+    {
+      "id": "x2",
+      "name": "Outward Expansion",
+      "volume": 1
+    },
+    {
+      "id": "x5",
+      "name": "Exactly-K Trick",
+      "volume": 1
+    },
+    {
+      "id": "x7",
+      "name": "Reversals",
+      "volume": 1
+    },
+    {
+      "id": "x8",
+      "name": "Prefix + Hash",
+      "volume": 1
+    }
+  ],
+  "tiers": [
+    {
+      "suffix": "easy",
+      "diff": 1,
+      "enemy": "bot",
+      "questions": 5,
+      "reward": {
+        "xp": 50,
+        "coins": 20
+      }
+    },
+    {
+      "suffix": "medium",
+      "diff": 2,
+      "enemy": "bot",
+      "questions": 6,
+      "reward": {
+        "xp": 80,
+        "coins": 30
+      }
+    },
+    {
+      "suffix": "hard",
+      "diff": 3,
+      "enemy": "ghost",
+      "questions": 7,
+      "reward": {
+        "xp": 120,
+        "coins": 45
+      }
+    },
+    {
+      "suffix": "boss",
+      "diff": 3,
+      "enemy": "boss",
+      "questions": 8,
+      "reward": {
+        "xp": 200,
+        "coins": 100
+      }
+    }
+  ],
+  "volumeNames": {
+    "1": "Arrays & Strings",
+    "2": "Binary Search & Ranges",
+    "3": "Hash, Stack, Heap",
+    "4": "Linked Lists, Trees & Tries",
+    "5": "Graphs & Grids",
+    "6": "Dynamic Programming",
+    "7": "Recursion, Greedy, Bits & Math"
+  }
+}
