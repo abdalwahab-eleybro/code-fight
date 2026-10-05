@@ -476,6 +476,18 @@
 .lsn-imagine.lit .lsn-imagine-word { opacity: 1; }
 .lsn-imagine.lit .lsn-imagine-text { opacity: 1; filter: none; color: #e2e8f0; }
 
+/* ── CF.Motion — Manim-style SVG stages (Imagine openers etc.) ── */
+.mt-stage {
+  margin-top: 14px; border-radius: 12px; overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(15,23,42,.6), #0b1020);
+  border: 1px solid rgba(148,163,184,.14);
+}
+.mt-svg { display: block; width: 100%; height: auto; max-height: 300px; }
+.mt-svg text { font-family: inherit; }
+@media (prefers-reduced-motion: reduce) {
+  .mt-stage * { animation: none !important; transition: none !important; }
+}
+
 /* ═══ Loop-invariant proof ladder ═══ */
 .lsn-proof {
   margin: 14px 0; padding: 14px 16px; border-radius: 14px;

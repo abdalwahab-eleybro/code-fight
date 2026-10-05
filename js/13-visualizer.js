@@ -8,6 +8,268 @@
 window.CF = window.CF || {};
 
 /* ─────────────────────────────────────────────────────────── */
+/*  CF.Motion — hand-authored Manim-style SVG scenes            */
+/*                                                              */
+/*  Remotion / manim require a build pipeline and produce       */
+/*  video files; this app is a zero-build single-page game, so  */
+/*  we recreate the SAME visual language natively:             */
+/*   · dark canvas + faint grid (the 3b1b backdrop)            */
+/*   · shapes that DRAW THEMSELVES on entry (stroke dashoffset) */
+/*   · elements that GLIDE with eased transforms, never snap    */
+/*   · glowing "dots" travelling along paths (packet flow)      */
+/*   · camera labels that fade up like 3b1b annotations        */
+/*                                                              */
+/*  A scene is declarative data:                                */
+/*  { viewBox:'0 0 640 260',                                   */
+/*    defs:[{id:'grad-x', kind:'linear'|'radial', stops:[[o,c]]}],*/
+/*    items:[                                                   */
+/*      { id, kind:'rect'|'circle'|'path'|'text'|'arrow'|'arc', */
+/*        x,y,w,h,r,d, text, fill, stroke, sw, opacity, rx,     */
+/*        anchor, size, weight,                                */
+/*        enter:'fade'|'draw'|'pop', delay(ms),                */
+/*        glow:true|color, pulse:true,                         */
+/*        motion:{ at:ms, dur:ms, ease:'smooth'|'bounce',      */
+/*                 props:{ x, y, w, h, r, scale, opacity,      */
+/*                         rotate } }                           */
+/*    ] }                                                       */
+/*                                                              */
+/*  mountScene(el, spec) paints it once (each element keeps a   */
+/*  stable DOM node keyed by id, so re-mounts tween from the    */
+/*  previous state instead of hard-cutting).                    */
+/*  Returns { play(), stop(), setMotion(id, m), el }.           */
+/* ─────────────────────────────────────────────────────────── */
+CF.Motion = (() => {
+  const NS = 'http://www.w3.org/2000/svg';
+  let uid = 0;
+
+  function mk(tag, attrs) {
+    const n = document.createElementNS(NS, tag);
+    for (const k in attrs) if (attrs[k] != null) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+  const EASE = 'cubic-bezier(.4,0,.2,1)';           /* smooth  */
+  const EASE_POP = 'cubic-bezier(.34,1.56,.64,1)';  /* bounce  */
+
+  function baseAttrs(it) {
+    const a = {};
+    if (it.x != null) a.x = it.x;
+    if (it.y != null) a.y = it.y;
+    if (it.w != null) a.width = it.w;
+    if (it.h != null) a.height = it.h;
+    if (it.r != null) a.r = it.r;
+    if (it.rx != null) a.rx = it.rx;
+    if (it.d != null) a.d = it.d;
+    if (it.cx != null) a.cx = it.cx;
+    if (it.cy != null) a.cy = it.cy;
+    if (it.fill != null) a.fill = it.fill;
+    if (it.stroke != null) a.stroke = it.stroke;
+    if (it.sw != null) a['stroke-width'] = it.sw;
+    if (it.opacity != null) a.opacity = it.opacity;
+    if (it.anchor) { a['text-anchor'] = it.anchor; }
+    if (it.size) a['font-size'] = it.size;
+    if (it.weight) a['font-weight'] = it.weight;
+    if (it.family) a['font-family'] = it.family;
+    return a;
+  }
+
+  function makeItem(it, defsHost, svgId) {
+    let n;
+    switch (it.kind) {
+      case 'circle': n = mk('circle', baseAttrs(it)); break;
+      case 'path':   n = mk('path', baseAttrs(it)); break;
+      case 'arc':    n = mk('path', baseAttrs(it)); break;
+      case 'text': {
+        n = mk('text', baseAttrs(it));
+        n.textContent = it.text != null ? String(it.text) : '';
+        break;
+      }
+      case 'arrow': {
+        /* line with an arrowhead marker */
+        const mid = 'mk-' + svgId + '-' + (++uid);
+        const marker = mk('marker', {
+          id: mid, viewBox: '0 0 10 10', refX: 8, refY: 5,
+          markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse'
+        });
+        marker.appendChild(mk('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: it.stroke || '#94a3b8' }));
+        defsHost.appendChild(marker);
+        n = mk('line', {
+          x1: it.x1, y1: it.y1, x2: it.x2, y2: it.y2,
+          stroke: it.stroke || '#94a3b8', 'stroke-width': it.sw || 2,
+          'marker-end': `url(#${mid})`, opacity: it.opacity
+        });
+        break;
+      }
+      default: n = mk('rect', baseAttrs(it));
+    }
+    if (it.glow) {
+      const col = it.glow === true ? (it.stroke || it.fill || '#22d3ee') : it.glow;
+      const f = 'glow-' + svgId + '-' + (++uid);
+      const filt = mk('filter', { id: f, x: '-60%', y: '-60%', width: '220%', height: '220%' });
+      filt.appendChild(mk('feDropShadow', { dx: 0, dy: 0, stdDeviation: 4, 'flood-color': col, 'flood-opacity': .85 }));
+      defsHost.appendChild(filt);
+      n.setAttribute('filter', `url(#${f})`);
+    }
+    if (it.pulse) {
+      const anim = mk('animate', {
+        attributeName: 'opacity', values: `${it.opacity ?? 1};${(it.opacity ?? 1) * .35};${it.opacity ?? 1}`,
+        dur: '1.6s', repeatCount: 'indefinite'
+      });
+      n.appendChild(anim);
+    }
+    return n;
+  }
+
+  /* apply static geometry (used for initial paint + motion targets) */
+  function place(n, it) {
+    const t = [];
+    if (it.rotate) {
+      const cx = (it.x || 0) + (it.w || 0) / 2, cy = (it.y || 0) + (it.h || 0) / 2;
+      t.push(`rotate(${it.rotate} ${it.cx || cx} ${it.cy || cy})`);
+    }
+    if (it.scale != null && it.scale !== 1) {
+      const ox = it.x != null ? it.x : (it.cx || 0);
+      const oy = it.y != null ? it.y : (it.cy || 0);
+      t.push(`translate(${ox} ${oy}) scale(${it.scale}) translate(${-ox} ${-oy})`);
+    }
+    n.style.transformOrigin = 'center';
+    if (t.length) n.style.transform = t.join(' ');
+  }
+
+  function runMotion(node, m, it) {
+    /* animate position/size props via attributes; transform props via WAAPI */
+    const to = {};
+    const p = m.props || {};
+    if (p.x != null) to.x = p.x;
+    if (p.y != null) to.y = p.y;
+    if (p.w != null) to.width = p.w;
+    if (p.h != null) to.height = p.h;
+    if (p.r != null) to.r = p.r;
+    if (p.opacity != null) to.opacity = p.opacity;
+    const dur = m.dur || 900;
+    const easing = m.ease === 'bounce' ? EASE_POP : EASE;
+    const start = () => {
+      if (Object.keys(to).length && node.animate) {
+        const frames = [{}];
+        const end = {};
+        for (const k in to) {
+          const cur = parseFloat(node.getAttribute(k)) || 0;
+          frames[0][k] = cur; end[k] = to[k];
+        }
+        try { node.animate([frames[0], end], { duration: dur, easing, fill: 'forwards' }); }
+        catch (e) { /* attribute fallback below */ }
+        setTimeout(() => { for (const k in to) node.setAttribute(k, to[k]); }, dur + 30);
+      }
+      if (p.scale != null || p.rotate != null) {
+        const nextIt = Object.assign({}, it, p);
+        const before = node.style.transform || 'none';
+        place(node, nextIt);
+        if (node.animate) {
+          try { node.animate([{ transform: before }, { transform: node.style.transform }],
+            { duration: dur, easing, fill: 'forwards' }); } catch (e) {}
+        }
+      }
+    };
+    if (m.at != null) setTimeout(start, m.at); else start();
+  }
+
+  function mountScene(el, spec) {
+    if (!spec || !spec.items) return null;
+    const svgId = 'sc' + (++uid);
+    el.innerHTML = '';
+    const svg = mk('svg', {
+      viewBox: spec.viewBox || '0 0 640 260',
+      class: 'mt-svg', preserveAspectRatio: 'xMidYMid meet'
+    });
+    const defs = mk('defs', {});
+    (spec.defs || []).forEach(d => {
+      const g = mk(d.kind === 'radial' ? 'radialGradient' : 'linearGradient', { id: d.id });
+      (d.stops || []).forEach(s =>
+        g.appendChild(mk('stop', { offset: s[0], 'stop-color': s[1], 'stop-opacity': s[2] != null ? s[2] : 1 })));
+      defs.appendChild(g);
+    });
+    /* faint 3b1b grid backdrop */
+    const pat = mk('pattern', { id: 'mt-grid-' + svgId, width: 28, height: 28, patternUnits: 'userSpaceOnUse' });
+    pat.appendChild(mk('path', { d: 'M 28 0 L 0 0 0 28', fill: 'none', stroke: 'rgba(148,163,184,.08)', 'stroke-width': 1 }));
+    defs.appendChild(pat);
+    svg.appendChild(defs);
+    svg.appendChild(mk('rect', { x: 0, y: 0, width: '100%', height: '100%', fill: `url(#mt-grid-${svgId})` }));
+
+    const nodes = {};
+    spec.items.forEach(it => {
+      const n = makeItem(it, defs, svgId);
+      n.setAttribute('data-mt', it.id || ('i' + (++uid)));
+      place(n, it);
+      svg.appendChild(n);
+      nodes[it.id] = n;
+
+      /* entry choreography */
+      const delay = it.delay || 0;
+      if (it.enter === 'draw' && (it.kind === 'path' || it.kind === 'arc' || it.kind === 'arrow')) {
+        try {
+          const len = n.getTotalLength ? n.getTotalLength() : 0;
+          if (len) {
+            n.style.strokeDasharray = len;
+            n.style.strokeDashoffset = len;
+            n.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }],
+              { duration: it.dur || 900, delay, easing: EASE, fill: 'forwards' });
+          }
+        } catch (e) {}
+      } else if (it.enter === 'pop') {
+        n.style.opacity = 0;
+        if (n.animate) n.animate(
+          [{ opacity: 0, transform: 'scale(.4)' }, { opacity: 1, transform: 'scale(1)' }],
+          { duration: 420, delay, easing: EASE_POP, fill: 'both' });
+        else n.style.opacity = it.opacity != null ? it.opacity : 1;
+      } else if (it.enter === 'fade') {
+        n.style.opacity = 0;
+        if (n.animate) n.animate([{ opacity: 0 }, { opacity: it.opacity != null ? it.opacity : 1 }],
+          { duration: 600, delay, easing: EASE, fill: 'forwards' });
+        else n.style.opacity = it.opacity != null ? it.opacity : 1;
+      }
+
+      /* scheduled motions */
+      (Array.isArray(it.motion) ? it.motion : it.motion ? [it.motion] : [])
+        .forEach(m => runMotion(n, m, it));
+
+      /* travelling dot along a path (flow packets) */
+      if (it.travel) {
+        const tr = it.travel;
+        const dot = mk('circle', { r: tr.r || 5, fill: tr.color || '#22d3ee' });
+        const flt = mk('filter', { id: 'tg' + svgId + (++uid), x: '-80%', y: '-80%', width: '260%', height: '260%' });
+        flt.appendChild(mk('feDropShadow', { dx: 0, dy: 0, stdDeviation: 3.2, 'flood-color': tr.color || '#22d3ee', 'flood-opacity': .9 }));
+        defs.appendChild(flt);
+        dot.setAttribute('filter', `url(#${flt.id})`);
+        svg.appendChild(dot);
+        const ghost = mk('path', { d: tr.d, fill: 'none', stroke: 'none' });
+        svg.appendChild(ghost);
+        const go = () => {
+          try {
+            const len = ghost.getTotalLength();
+            const frames = [];
+            for (let i = 0; i <= 30; i++) {
+              const pt = ghost.getPointAtLength(len * i / 30);
+              frames.push({ transform: `translate(${pt.x}px, ${pt.y}px)` });
+            }
+            dot.animate(frames, { duration: tr.dur || 1400, easing: EASE, iterations: tr.loop ? Infinity : 1 });
+          } catch (e) {}
+        };
+        setTimeout(go, tr.at || 0);
+        ghost.remove();
+      }
+    });
+
+    el.appendChild(svg);
+    return {
+      svg,
+      node: (id) => nodes[id],
+      setMotion: (id, m) => { const it = spec.items.find(i => i.id === id); if (nodes[id] && it) runMotion(nodes[id], m, it); }
+    };
+  }
+
+  return { mountScene };
+})();
+
+/* ─────────────────────────────────────────────────────────── */
 /*  NARRATOR — narration goes in the AUDIO channel,            */
 /*  screen shows only short labels (redundancy principle)     */
 /* ─────────────────────────────────────────────────────────── */
