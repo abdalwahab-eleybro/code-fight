@@ -255,6 +255,12 @@ CF.Sonify = (() => {
       case 'buzz':
         tone(180, 0.16, { type: 'sawtooth', vol: 0.09 * v, glideTo: 120 });
         break;
+      case 'tick':
+        /* attention chime — used when a checkpoint card/popup appears so it
+           is never missed (two soft rising notes, quieter than 'win') */
+        tone(740, 0.10, { type: 'triangle', vol: 0.07 * v });
+        setTimeout(() => tone(980, 0.14, { type: 'triangle', vol: 0.07 * v }), 110);
+        break;
     }
   }
 
@@ -1041,7 +1047,30 @@ CF.Visualizer = (() => {
       }
       CF.Narrator.setRate(prefs.speed || 1);
       CF.Narrator.speak(s.narration || s.caption || '');
+      /* VOICE-LOCKED CHECKPOINTS: the lesson shell (Watch/Brute phases) used
+         to mount its 🤔 question card on a fixed wall-clock estimate of this
+         sentence. Estimates run long or short → the card either cut in over
+         the narrator's last words, or appeared seconds after the voice ended
+         — silently, below the fold. Now the player owns the clock: lessons
+         poll narrationIdle(), which is true only once the CURRENT step's
+         intro has genuinely been spoken (or, if muted, had reading time). */
+      narrationStartedAt = Date.now();
+      narrationMs = prefs.narration
+        ? Math.min(CF.Narrator.estimateMs(s.narration || s.caption || '', prefs.speed || 1), 20000)
+        : Math.min(stepWaitMs(), 2500);
       if (onProgress) onProgress(idx, steps.length);
+    }
+
+    let narrationStartedAt = 0;
+    let narrationMs = 0;
+    function narrationIdle() {
+      if (destroyed) return true;
+      const el = Date.now() - narrationStartedAt;
+      if (!prefs.narration) return el >= narrationMs;
+      /* hard floor: never let a lying engine release the card while the
+         intro sentence could still be mid-word */
+      if (el < Math.min(narrationMs, 1200)) return false;
+      return !voiceBusy();
     }
 
     function goTo(i) {
@@ -1077,8 +1106,11 @@ CF.Visualizer = (() => {
          spoken (or plausibly finished), so context always comes first. */
       if (s.predict && mode === 'watch') {
         pause();
-        if (suppressOverlay) { afterNarration(() => {}); return; } /* lesson shell owns this checkpoint */
-        afterNarration(() => showPredict(s));
+        /* lesson shell owns this checkpoint (market card) — no built-in
+           popup, and NO afterNarration timer here either: the old code ran
+           a 200 ms poll loop on top of the lesson's own timer, and the two
+           raced each other mid-sentence. The player now only exposes
+           narrationIdle(); lessons gate their card mount on it. */
         return;
       }
       if (s.drive && mode === 'drive') { pause(); afterNarration(() => showDrive(s)); return; }
@@ -1169,6 +1201,10 @@ CF.Visualizer = (() => {
         });
         optsBox.appendChild(b);
       });
+      /* announce the popup so it is never missed (it can appear off-screen
+         on short viewports): chime + gentle scroll into view */
+      CF.Sonify.fx('tick', {});
+      try { overlay.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
     }
 
     /* ── drive bar (drive mode) ── */
@@ -1252,7 +1288,7 @@ CF.Visualizer = (() => {
     renderStep();
     maybeInteract(); /* engage: drive mode starts advancing / opens the first prompt */
 
-    return { destroy, goTo, stepForward, play: () => { if (!playing) togglePlay(); } };
+    return { destroy, goTo, stepForward, narrationIdle, play: () => { if (!playing) togglePlay(); } };
   }
 
   return { createPlayer, renderScene, animateScene, glideScene };

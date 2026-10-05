@@ -2049,24 +2049,22 @@ CF.Lessons = (() => {
     chkHost.className = 'lsn-market-mount';
     mount.parentNode.insertBefore(chkHost, mount.nextSibling);
     const brTrace = br.trace();
+    let cancelCp = null; /* cancels a pending voice-locked checkpoint poll */
     const player = CF.Visualizer.createPlayer({
       container: mount, trace: brTrace, mode: 'watch',
       suppressOverlay: true, /* one checkpoint UI at a time — the market card */
       onProgress: (i) => {
         const s = brTrace.steps[i];
-        if (!(s && s.predict)) { chkHost.innerHTML = ''; return; }
-        setTimeout(() => {
-          if (!container.contains(chkHost)) return;
-          const cur = brTrace.steps[i];
-          if (!(cur && cur.predict)) return;
-          chkHost.innerHTML = '';
-          mountMarket(chkHost, cur.predict, (res) => {
-            if (res && res.right !== null) {
-              chkHost.classList.add('lsn-market-done');
-              setTimeout(() => { try { player.play(); } catch (e) {} }, 900);
-            }
-          });
-        }, Math.min(CF.Narrator.estimateMs(s.narration || s.caption || '', 1), 20000));
+        if (cancelCp) { cancelCp(); cancelCp = null; }
+        if (!(s && s.predict)) { chkHost.innerHTML = ''; chkHost.classList.remove('lsn-market-done'); return; }
+        chkHost.innerHTML = '';
+        cancelCp = mountCheckpoint(player, chkHost, s.predict, (res) => {
+          cancelCp = null;
+          if (res && res.right !== null) {
+            chkHost.classList.add('lsn-market-done');
+            setTimeout(() => { try { player.play(); } catch (e) {} }, 900);
+          }
+        });
       },
       onDone: () => {
         const note = container.querySelector('#lsnNote');
@@ -2490,7 +2488,27 @@ CF.Lessons = (() => {
      MESS FIX #2: it never calls CF.Narrator.speak() anymore. The old version
        cancelled the narrator mid-sentence to read its own verdict — that was
        the "interruption" learners heard. Verdicts are text-only; the voice
-       belongs to the step narration alone. */
+       belongs to the step narration alone.
+     SILENT-CARD FIX: mountCheckpoint() releases the card only when the
+       player reports the intro narration has genuinely finished, and the
+       card announces itself loudly: attention chime, pulsing gold border,
+       and a smooth scroll so it slides up into view instead of appearing
+       silently below the code. */
+  function mountCheckpoint(player, host, predict, onSettled) {
+    let alive = true;
+    const poll = () => {
+      if (!alive) return;
+      if (!host || !host.isConnected) { alive = false; return; } /* phase changed */
+      if (!(player && player.narrationIdle())) { setTimeout(poll, 200); return; }
+      mountMarket(host, predict, onSettled);
+      try {
+        host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (e) {}
+    };
+    setTimeout(poll, 200);
+    return () => { alive = false; };
+  }
+
   function mountMarket(host, predict, onSettled) {
     if (!host || !predict) { if (onSettled) onSettled(null); return; }
     host.className = 'lsn-market';
@@ -2503,6 +2521,7 @@ CF.Lessons = (() => {
       <div class="lsn-market-q">🤔 ${esc(predict.q)}</div>
       <div class="lsn-market-opts"></div>
       <div class="lsn-market-fb"></div>`;
+    CF.Sonify.fx('tick', {}); /* announce: the card must never be silent */
     const optsBox = host.querySelector('.lsn-market-opts');
     const fb = host.querySelector('.lsn-market-fb');
     let settled = false;
@@ -2564,6 +2583,7 @@ CF.Lessons = (() => {
     /* collect the checkpoints up front so each 🤔 stop becomes a market round */
     const checks = (trace.steps || []).filter(s => s.predict).map(s => s.predict);
     let round = -1;
+    let cancelCp = null; /* cancels a pending voice-locked checkpoint poll */
     const stats = { predicts: { right: 0, total: 0 } };
     const player = CF.Visualizer.createPlayer({
       container: mount, trace, mode: 'watch',
@@ -2571,28 +2591,27 @@ CF.Lessons = (() => {
         The built-in 🤔 popup used to stack on top of it mid-narration. */
       onProgress: (i) => {
         const s = trace.steps[i];
+        if (cancelCp) { cancelCp(); cancelCp = null; }
         if (s && s.predict) {
-          /* mount the market only AFTER the intro sentence has been spoken —
-             same voice-locked pacing as before, but now there is exactly one
-             question card, and nothing ever speaks over the narrator. */
+          /* VOICE-LOCKED + LOUD: the card waits for narrationIdle() from the
+             player itself (no wall-clock guess that races the voice), then
+             announces with a chime and slides into view. */
           round++;
-          setTimeout(() => {
-            if (!container.contains(marketHost)) return; /* phase changed */
-            const cur = trace.steps[i];
-            if (!(cur && cur.predict)) return;           /* learner stepped away */
-            marketHost.innerHTML = '';
-            mountMarket(marketHost, cur.predict, (res) => {
-              if (res && res.right !== null) {
-                stats.predicts.total++;
-                if (res.right) stats.predicts.right++;
-              }
+          marketHost.innerHTML = '';
+          marketHost.classList.remove('lsn-market-done');
+          cancelCp = mountCheckpoint(player, marketHost, s.predict, (res) => {
+            cancelCp = null;
+            if (res && res.right !== null) {
+              stats.predicts.total++;
+              if (res.right) stats.predicts.right++;
               /* learner answered → resume the walkthrough automatically */
-              if (res && res.right !== null) {
-                marketHost.classList.add('lsn-market-done');
-                setTimeout(() => { try { player.play(); } catch (e) {} }, 900);
-              }
-            });
-          }, Math.min(CF.Narrator.estimateMs(s.narration || s.caption || '', 1), 20000));
+              marketHost.classList.add('lsn-market-done');
+              setTimeout(() => { try { player.play(); } catch (e) {} }, 900);
+            }
+          });
+        } else {
+          marketHost.innerHTML = '';
+          marketHost.classList.remove('lsn-market-done');
         }
       },
       onDone: (pstats) => {
