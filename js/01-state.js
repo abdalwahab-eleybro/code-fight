@@ -170,10 +170,49 @@ CF.State = (() => {
   }
 
   /* ═══ CAMPAIGN ═══ */
+  // Skill-tree gating: a level unlocks when its PATTERN's lesson prerequisite
+  // chain is satisfied — mirroring the lesson picker exactly. Patterns with no
+  // prereqs (f1, p1, p4, p6 → Converging/Sliding/Prefix) are open from the
+  // start; e.g. "Exactly-K Trick" fights stay locked until BOTH Sliding
+  // Window and Prefix Sum lessons are completed. Within a pattern, tiers stay
+  // sequential (easy→medium→hard→boss).
+  const LESSON_PREREQS_FALLBACK = {
+    f1: [], p1: ['f1'], p4: ['p1'], p6: ['f1'],
+    p2: ['f1'], p3: ['f1'], guard: ['f1'],
+    p5: ['p3'], p7: ['p4'], x1: ['p1'], x2: ['p1', 'p2'],
+    x8: ['p6'], x5: ['p4', 'p6']
+  };
+  function lessonPrereqs(patternId) {
+    try {
+      if (window.CF && CF.Lessons && typeof CF.Lessons.prereqsFor === 'function') {
+        const r = CF.Lessons.prereqsFor(patternId);
+        if (Array.isArray(r)) return r;
+      }
+    } catch (e) { /* fall through to static map */ }
+    return LESSON_PREREQS_FALLBACK[patternId] || [];
+  }
+  function patternLessonDone(pid) {
+    try {
+      if (window.CF && CF.Lessons && typeof CF.Lessons.isPatternLessonDone === 'function') {
+        return !!CF.Lessons.isPatternLessonDone(pid);
+      }
+    } catch (e) { /* ignore */ }
+    const rec = profile.lessons && profile.lessons[pid];
+    return !!(rec && rec.completed);
+  }
+  function prereqChainDone(patternId) {
+    const need = lessonPrereqs(patternId);
+    if (!need.length) return true;
+    return need.every(p => patternLessonDone(p));
+  }
   function isLevelUnlocked(levelId) {
-    const idx = CF.Campaign.levels.findIndex(l => l.id === levelId);
+    const levels = CF.Campaign.levels;
+    const idx = levels.findIndex(l => l.id === levelId);
     if (idx <= 0) return true;   // first level always unlocked
-    const prev = CF.Campaign.levels[idx - 1];
+    const lvl = levels[idx];
+    if (!prereqChainDone(lvl.pattern)) return false;
+    if (lvl.tier === 'easy') return true;  // pattern opened by the skill tree
+    const prev = levels[idx - 1];          // tiers within a pattern stay sequential
     return !!(profile.campaignLevels[prev.id]?.cleared);
   }
 
@@ -221,6 +260,7 @@ CF.State = (() => {
     addXP, addCoins, xpForLevel,
     getFighter, equipFighter,
     isLevelUnlocked, completeCampaignLevel,
+    prereqChainDone, lessonPrereqs, patternLessonDone,
     checkAndUpdateStreak
   };
 })();
@@ -311,6 +351,8 @@ CF.Campaign = (() => {
 
   return {
     levels,
+    get patterns() { return PATTERNS; },
+    get tiers() { return TIERS; },
     get volumeNames() { return volumeNames; }
   };
 })();

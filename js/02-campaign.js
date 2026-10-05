@@ -45,6 +45,24 @@ CF.CampaignLogic = (() => {
   // Returns a human-readable reason why a level is locked (or null if unlocked).
   function lockedReason(levelId) {
     if (S.isLevelUnlocked(levelId)) return null;
+    const lvl = getLevel(levelId);
+    // Skill-tree gate: pattern's lesson prerequisites not finished yet.
+    if (lvl && !S.prereqChainDone(lvl.pattern)) {
+      const need = S.lessonPrereqs(lvl.pattern);
+      const missing = need.filter(p => !S.patternLessonDone(p));
+      if (missing.length) {
+        const names = missing.map(m => {
+          try {
+            if (window.CF && CF.Lessons && CF.Lessons.LESSONS) {
+              const l = CF.Lessons.LESSONS.find(x => x.id === m);
+              if (l) return l.title;
+            }
+          } catch (e) {}
+          return m;
+        });
+        return `Learn “${names.join('” + “')}” first`;
+      }
+    }
     const prev = getPrevLevel(levelId);
     if (!prev) return null;
     return `Clear "${prev.name}" first`;

@@ -180,9 +180,19 @@ CF.Modes = (() => {
     const L = CF.CampaignLogic;
 
     // Only patterns the player has unlocked at least one level in
-    const unlockedPatterns = [...new Set(C.levels
+    let unlockedPatterns = [...new Set(C.levels
       .filter(l => S.isLevelUnlocked(l.id))
       .map(l => l.pattern))];
+
+    // Skill-tree fallback: brand-new players may have finished lessons but no
+    // fights yet — seed Blitz with every pattern whose prereq chain is done,
+    // so interleaved cross-family practice starts right after learning.
+    if (!unlockedPatterns.length) {
+      const pats = (C.patterns || []);
+      unlockedPatterns = [...new Set(pats
+        .filter(p => S.prereqChainDone(p.id))
+        .map(p => p.id))];
+    }
 
     // Total questions solved = rough progression indicator
     const solved = Object.values(S.profile.campaignLevels)

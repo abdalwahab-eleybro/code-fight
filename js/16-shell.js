@@ -348,9 +348,13 @@
     CF.Lessons.render(document.getElementById('learnContent'), {
       onExit: () => { showScreen('screen-menu'); },
       onFight: (patternId) => {
+        // Skill-tree aware: after finishing a lesson, jump straight into the
+        // matching fight if its prereq chain opened it; otherwise send the
+        // learner back to the picker where the next unlock is visible.
         const lvl = C.levels.find(l => l.pattern === patternId && l.tier === 'easy')
                  || C.levels.find(l => l.pattern === patternId);
-        if (lvl) startLevel(lvl.id);
+        if (lvl && S.isLevelUnlocked(lvl.id)) startLevel(lvl.id);
+        else showScreen('screen-map');
       }
     });
   });

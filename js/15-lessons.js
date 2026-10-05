@@ -1122,6 +1122,7 @@ CF.Lessons = (() => {
   const LESSONS = [
     {
       id: 'f1',
+      pattern: 'f1',
       tier: 1, level: 1, difficulty: 'Foundation', prereqs: [],
       icon: '🧱',
       title: 'Foundations: 6 Primitives',
@@ -1247,6 +1248,7 @@ CF.Lessons = (() => {
     },
     {
       id: 'p1',
+      pattern: 'p1',
       tier: 1, level: 2, difficulty: 'Core', prereqs: ['f1'],
       icon: '↔️',
       title: 'Converging Pointers',
@@ -1368,6 +1370,7 @@ CF.Lessons = (() => {
     },
     {
       id: 'p4',
+      pattern: 'p4',
       tier: 1, level: 3, difficulty: 'Core', prereqs: ['f1'],
       icon: '🪟',
       title: 'Sliding Window',
@@ -1493,6 +1496,7 @@ CF.Lessons = (() => {
     },
     {
       id: 'p6',
+      pattern: 'p6',
       tier: 1, level: 4, difficulty: 'Core', prereqs: ['f1'],
       icon: '🧮',
       title: 'Prefix Sum',
@@ -2185,6 +2189,7 @@ CF.Lessons = (() => {
     const mkDrive = () => buildTrace({ code: sc.codeMap.lines.map(l => l.code), steps: sc.idea.steps.map(st => ({ line: -1, caption: st.word, narration: st.text, state: st.state, fx: st.fx })) }, 'drive');
     return {
       id,
+      pattern: id,
       tier: meta.tier, level: meta.level, difficulty: meta.difficulty, prereqs: meta.prereqs,
       icon: sc.icon || '🧠',
       title: sc.title || id,
@@ -3241,6 +3246,19 @@ CF.Lessons = (() => {
   return {
     render,
     LESSONS,
+    // Skill-tree API: campaign map + fight engine use these to gate levels by
+    // lesson-prereq chains (mirrors the picker's lock logic exactly).
+    prereqsFor(id) {
+      const ls = LESSONS.find(l => l.id === id);
+      if (ls) return ls.prereqs || [];
+      const m = SHEET_META[id];
+      return m ? m.prereqs : null;   // unknown → caller falls back
+    },
+    isPatternLessonDone(pid) {
+      // A pattern counts as "learned" when its own lesson is complete.
+      // Every pattern id (f1, p1..p7, guard, x1, x2, x5, x8) matches a lesson id.
+      return statusOf(pid) === 'done';
+    },
     _traces: { twoSumTrace, twoSumBugTrace, minSubarrayTrace, windowBugTrace, prefixTrace }
   };
 })();
