@@ -2297,6 +2297,7 @@ CF.Lessons = (() => {
       out.push(s);
       const rev = { line: -1, caption: '→ ' + st.word, narration: st.word + '. ' + (st.why || st.text), state: st.state };
       if (st.fx) rev.fx = st.fx;
+      if (st.sceneFx) rev.sceneFx = st.sceneFx; /* hand-authored beats auto-diff */
       /* MANIM-STYLE CHOREOGRAPHY: derive sceneFx from the state DIFF between
          this reveal and the previous one — changed cells get pulsing rings,
          pointer moves draw a self-drawing arc with a travelling packet, and
@@ -2311,7 +2312,7 @@ CF.Lessons = (() => {
      to any idea step; those win over the auto-derived diff so a hand-timed
      moment (the swap arc on pass 1, the window glow at discovery) always lands. */
   function bespokeFx(st) {
-    const f = st && st.fx;
+    const f = (st && st.sceneFx) || (st && typeof st.fx === 'object' && !st.fx.type ? st.fx : null);
     if (!f || typeof f !== 'object' || f.type) return null; /* string fx = sonify only */
     const fx = {};
     if (f.ring) fx.cells = [].concat(f.ring);
