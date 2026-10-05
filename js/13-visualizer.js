@@ -254,7 +254,6 @@ CF.Motion = (() => {
           } catch (e) {}
         };
         setTimeout(go, tr.at || 0);
-        ghost.remove();
       }
     });
 
