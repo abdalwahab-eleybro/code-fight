@@ -2421,7 +2421,7 @@ CF.Lessons = (() => {
         chkHost.innerHTML = '';
         cancelCp = mountCheckpoint(player, chkHost, s.predict, (res) => {
           cancelCp = null;
-          if (res && res.right !== null) {
+          if (res && (res.right !== null || res.resumed)) {
             chkHost.classList.add('lsn-market-done');
             setTimeout(() => { try { player.play(); } catch (e) {} }, 900);
           }
@@ -2898,14 +2898,26 @@ CF.Lessons = (() => {
        silently below the code. */
   function mountCheckpoint(player, host, predict, onSettled) {
     let alive = true;
+    const t0 = Date.now();
+    /* FREEZE FIX: the old poll waited on narrationIdle() with NO deadline.
+       If the voice engine wedged (speechSynthesis.speaking stuck true),
+       the 🤔 card never mounted and the lesson sat frozen at the first
+       checkpoint forever. Voice-lock is a nicety — it may delay the card,
+       it must never strand the lesson. */
+    const MAX_WAIT = 15000;
+    const mountNow = () => {
+      if (!alive) return;
+      alive = false;
+      if (!host || !host.isConnected) return; /* phase changed */
+      mountMarket(host, predict, onSettled);
+      try { host.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+    };
     const poll = () => {
       if (!alive) return;
       if (!host || !host.isConnected) { alive = false; return; } /* phase changed */
+      if (Date.now() - t0 >= MAX_WAIT) { mountNow(); return; }   /* voice wedged → go anyway */
       if (!(player && player.narrationIdle())) { setTimeout(poll, 200); return; }
-      mountMarket(host, predict, onSettled);
-      try {
-        host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      } catch (e) {}
+      mountNow();
     };
     setTimeout(poll, 200);
     return () => { alive = false; };
@@ -2927,6 +2939,20 @@ CF.Lessons = (() => {
     const optsBox = host.querySelector('.lsn-market-opts');
     const fb = host.querySelector('.lsn-market-fb');
     let settled = false;
+    const addContinue = () => {
+      /* ESCAPE HATCH: the walkthrough resumes automatically ~900 ms after
+         settling — but if that chain ever dies (tab backgrounded, timer
+         throttled, wedged voice), this button guarantees forward motion.
+         A lesson must never be able to freeze on a checkpoint. */
+      const cont = document.createElement('button');
+      cont.className = 'vz-opt continue lsn-market-cont';
+      cont.textContent = 'Continue ▶';
+      cont.addEventListener('click', () => {
+        if (onSettled) onSettled({ resumed: 'manual' });
+      });
+      fb.appendChild(document.createElement('br'));
+      fb.appendChild(cont);
+    };
     const settle = (i) => {
       if (settled) return;
       settled = true;
@@ -2935,7 +2961,7 @@ CF.Lessons = (() => {
         xpAdd(-STAKE);                       /* stake leaves the purse */
         if (right) xpAdd(STAKE + BONUS);     /* winner takes stake back + bonus */
       }
-      const buttons = optsBox.querySelectorAll('.vz-opt');
+      const buttons = optsBox.querySelectorAll('.vz-opt:not(.continue)');
       buttons.forEach((o, j) => { o.disabled = true; if (j === predict.correct) o.classList.add('right'); });
       if (buttons[i]) buttons[i].classList.add(right ? 'right' : 'wrong');
       CF.Sonify.fx(right ? 'win' : 'buzz', {});
@@ -2944,6 +2970,7 @@ CF.Lessons = (() => {
           ? `✅ Settled in your favor.${canStake ? ` +${BONUS} XP.` : ''}`
           : `❌ Settled against you.${canStake ? ` −${STAKE} XP — queued for review.` : ' Queued for review.'}`}<br>${esc(predict.why)}`;
       if (onSettled) onSettled({ right, predict });
+      addContinue();
     };
     predict.options.forEach((opt, i) => {
       const b = document.createElement('button');
@@ -2958,10 +2985,11 @@ CF.Lessons = (() => {
     skip.addEventListener('click', () => {
       if (settled) return;
       settled = true;
-      optsBox.querySelectorAll('.vz-opt').forEach((o, j) => { o.disabled = true; if (j === predict.correct) o.classList.add('right'); });
+      optsBox.querySelectorAll('.vz-opt:not(.continue)').forEach((o, j) => { o.disabled = true; if (j === predict.correct) o.classList.add('right'); });
       fb.className = 'lsn-market-fb';
       fb.innerHTML = `⏭ No stake placed. ${esc(predict.why)}`;
       if (onSettled) onSettled({ right: null, predict });
+      addContinue();
     });
     host.appendChild(skip);
   }
@@ -3003,10 +3031,12 @@ CF.Lessons = (() => {
           marketHost.classList.remove('lsn-market-done');
           cancelCp = mountCheckpoint(player, marketHost, s.predict, (res) => {
             cancelCp = null;
-            if (res && res.right !== null) {
+            if (res && res.right !== null && !res.resumed) {
               stats.predicts.total++;
               if (res.right) stats.predicts.right++;
-              /* learner answered → resume the walkthrough automatically */
+            }
+            if (res && (res.right !== null || res.resumed)) {
+              /* learner answered (or pressed Continue) → resume the walkthrough */
               marketHost.classList.add('lsn-market-done');
               setTimeout(() => { try { player.play(); } catch (e) {} }, 900);
             }

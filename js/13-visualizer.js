@@ -55,6 +55,27 @@ CF.Narrator = (() => {
     try { window.speechSynthesis.onvoiceschanged = () => { voicePicked = false; pickVoice(); }; } catch (e) {}
   }
 
+  let keepAliveTimer = null;
+  function stopKeepAlive() {
+    if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+  }
+  function startKeepAlive(u) {
+    /* Chrome bug: long utterances (>~15 s) silently die mid-sentence —
+       speaking stays true, no onend ever fires, and every gate that
+       waits for the voice FREEZES. The classic workaround: toggle the
+       queue with pause()/resume() every few seconds while we speak. */
+    stopKeepAlive();
+    keepAliveTimer = setInterval(() => {
+      try {
+        if (!curUtter || curUtter !== u) { stopKeepAlive(); return; }
+        if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+          window.speechSynthesis.pause();
+          window.speechSynthesis.resume();
+        }
+      } catch (e) { stopKeepAlive(); }
+    }, 7000);
+  }
+
   function speak(text) {
     if (!enabled || !supported() || !text) return;
     try {
@@ -68,11 +89,12 @@ CF.Narrator = (() => {
       startedAt = 0; endedAt = 0;
       speakAt = Date.now();
       u.onstart = () => { startedAt = Date.now(); };
-      u.onend = () => { endedAt = Date.now(); if (curUtter === u) curUtter = null; };
-      u.onerror = () => { endedAt = Date.now(); if (curUtter === u) curUtter = null; };
+      u.onend = () => { endedAt = Date.now(); stopKeepAlive(); if (curUtter === u) curUtter = null; };
+      u.onerror = () => { endedAt = Date.now(); stopKeepAlive(); if (curUtter === u) curUtter = null; };
       curUtter = u;
+      startKeepAlive(u);
       window.speechSynthesis.speak(u);
-    } catch (e) { curUtter = null; /* non-fatal */ }
+    } catch (e) { curUtter = null; stopKeepAlive(); /* non-fatal */ }
   }
 
   /* true ONLY while the voice has verifiably started and not yet finished.
@@ -88,10 +110,21 @@ CF.Narrator = (() => {
     try {
       if (!startedAt) return (Date.now() - speakAt) < 700;
       if (!(window.speechSynthesis.speaking || window.speechSynthesis.pending)) return false;
-      const cap = Math.min(estimateMs(curUtter.text, rate) + 2500, 12000);
+      /* HARD CAP: never trust the engine past estimate + slack. Without
+         this a wedged speechSynthesis (speaking stays true forever in
+         some engines) froze every voice-gated step mid-sentence. */
+      const cap = estimateMs(curUtter.text, rate) + 4000;
       if (Date.now() - startedAt > cap) return false;
       return true;
     } catch (e) { return false; }
+  }
+
+  /* Absolute deadline by which the CURRENT utterance must be considered
+     finished, no matter what the engine claims. Every playback gate uses
+     this as its final fallback so nothing can wait on voice forever. */
+  function busyUntil() {
+    if (!enabled || !supported() || !curUtter || endedAt) return 0;
+    return (startedAt || speakAt) + estimateMs(curUtter.text, rate) + 4000;
   }
 
   /* Rough spoken-duration estimate (~380 ms/word + punctuation pauses).
@@ -117,6 +150,7 @@ CF.Narrator = (() => {
     speak, stop,
     supported,
     isSpeaking,
+    busyUntil,
     estimateMs,
     isEnabled: () => enabled,
     setEnabled: (v) => { enabled = !!v; if (!enabled) stop(); },
@@ -1084,6 +1118,11 @@ CF.Visualizer = (() => {
        so a wedged engine can't hide a prompt forever. */
     function voiceBusy() {
       if (!CF.Narrator.isEnabled() || !CF.Narrator.supported()) return false;
+      /* NEVER trust speechSynthesis.speaking alone: it wedges true in
+         several engines and froze every gated step. The Narrator's own
+         tracked utterance (with a hard estimate cap) is the source of
+         truth; `pending` only counts while that utterance is live. */
+      if (!CF.Narrator.isSpeaking()) return false;
       try { return window.speechSynthesis.speaking || window.speechSynthesis.pending; }
       catch (e) { return false; }
     }
@@ -1096,13 +1135,19 @@ CF.Visualizer = (() => {
         holdMs = text ? Math.min(CF.Narrator.estimateMs(text, 2), 4000) : 0;
       } else {
         /* voice on → spoken duration estimate as the floor; the engine's own
-           speaking/pending flags extend it when real speech runs longer */
-        holdMs = Math.min(CF.Narrator.estimateMs(text, prefs.speed || 1), 20000);
+           speaking/pending flags extend it when real speech runs longer.
+           Cap 15 s to match estimateMs — a wedged engine can never push
+           this gate out further (was 20 s, a freeze window). */
+        holdMs = Math.min(CF.Narrator.estimateMs(text, prefs.speed || 1), 15000);
       }
       const t0 = Date.now();
+      /* ABSOLUTE DEADLINE: a wedged voice engine can never hide a prompt
+         forever — after hold + slack the callback fires regardless. */
+      const deadline = t0 + holdMs + 4000;
       let settled = false;
       const tick = () => {
         if (destroyed || settled) return;
+        if (Date.now() >= deadline) { settled = true; fn(); return; }
         const el = Date.now() - t0;
         if (el < holdMs || voiceBusy()) { timer = setTimeout(tick, 200); return; }
         settled = true;
@@ -1156,6 +1201,15 @@ CF.Visualizer = (() => {
       cap.textContent = s.caption || '';
       cap.className = 'vz-caption' + (prefs.captions && s.narration ? ' full' : '');
       if (prefs.captions && s.narration) cap.textContent = s.narration;
+      /* SPEAK THE STEP: the player owns its narration. Without this the
+         walkthrough was silent AND every voice gate waited on a stale
+         utterance from the previous phase — steps advanced out of sync
+         with what the learner could see. Track when we spoke so the
+         pacing gates have an honest clock even without speechSynthesis. */
+      const spokenText = s.narration || s.caption || '';
+      narrationStartedAt = Date.now();
+      narrationMs = CF.Narrator.estimateMs(spokenText, prefs.speed || 1);
+      if (spokenText) CF.Narrator.speak(spokenText);
       /* caption re-entry pop — text changes deserve a soft arrival too */
       if (cap.animate) cap.animate([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: 300, easing: 'ease-out' });
       if (s.fx && s.fx.type) {
@@ -1175,9 +1229,14 @@ CF.Visualizer = (() => {
     function narrationIdle() {
       if (destroyed) return true;
       const el = Date.now() - narrationStartedAt;
+      /* HARD BACKSTOP: whatever the engine claims, after the estimate +
+         slack the voice is declared done. This is what unfreezes the
+         lesson when speechSynthesis wedges mid-sentence. */
+      const bu = CF.Narrator.busyUntil();
+      if (bu && Date.now() > bu) return true;
       if (!prefs.narration) return el >= narrationMs;
       /* hard floor: never let a lying engine release the card while the
-         intro sentence could still be mid-word */
+         intro sentence could still be mid-word — but only up to the cap */
       if (el < Math.min(narrationMs, 1200)) return false;
       return !voiceBusy();
     }
@@ -1235,12 +1294,17 @@ CF.Visualizer = (() => {
          still fall back to the estimate so steps never machine-gun past
          half-heard narration. */
       const minHold = prefs.narration
-        ? Math.min(CF.Narrator.estimateMs(text, prefs.speed || 1), 20000)
+        ? Math.min(CF.Narrator.estimateMs(text, prefs.speed || 1), 15000)
         : stepWaitMs();
       const t0 = Date.now();
+      /* ABSOLUTE DEADLINE: even if voiceBusy() never releases (wedged
+         engine), playback MUST advance by this time. Without it the
+         walkthrough froze forever at the first narrated step. */
+      const deadline = t0 + minHold + 4000;
       let settled = false;
       const tick = () => {
         if (destroyed || !playing || settled) return;
+        if (Date.now() >= deadline) { settled = true; stepForward(); return; }
         const el = Date.now() - t0;
         if (el < minHold || voiceBusy()) { timer = setTimeout(tick, 200); return; }
         settled = true;
